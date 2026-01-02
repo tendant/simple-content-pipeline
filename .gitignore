@@ -1,6 +1,7 @@
 # Binaries
 /pipeline-worker
 /trigger
+/pipeline-standalone
 /cmd/pipeline-worker/pipeline-worker
 *.exe
 *.exe~
