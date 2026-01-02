@@ -366,10 +366,14 @@ Same container image can be reused across environments.
 
 ## 10. Milestones
 
-### M1 — Skeleton
+### M1 — Skeleton ✅ COMPLETE
 
-- Worker binary boots DBOS + HTTP server
-- `/v1/process` starts a workflow
+- ✅ Worker binary boots HTTP server
+- ✅ `/v1/process` endpoint accepts requests
+- ✅ HTTP client library (`pkg/client`)
+- ✅ Shared types (`pkg/pipeline`)
+- ✅ Basic project structure
+- ⏸️ DBOS integration (deferred to M2)
 
 ### M2 — Dedupe Ledger
 
@@ -401,6 +405,71 @@ Same container image can be reused across environments.
 - Step-level skip logic (artifact existence and/or step state) prevents wasted compute
 - Deterministic outputs > complex locking
 - One clear trigger contract across all projects
+
+---
+
+## 12. Quick Start
+
+### Build and Run
+
+```bash
+# Build the worker
+go build -o pipeline-worker ./cmd/pipeline-worker
+
+# Run the worker
+./pipeline-worker
+
+# Or run directly
+go run ./cmd/pipeline-worker
+```
+
+**Configuration:**
+- `PIPELINE_HTTP_ADDR` - HTTP listen address (default: `:8080`)
+
+### Test with Example
+
+```bash
+# In terminal 1: Start the worker
+go run ./cmd/pipeline-worker
+
+# In terminal 2: Trigger processing
+go run ./examples/trigger/main.go
+```
+
+Expected output:
+```
+✓ Processing triggered successfully
+  Run ID: 54b579ef-1260-4773-a5a3-d6d27fa86df0
+  Dedupe seen count: 0
+```
+
+### Using the Client Library
+
+```go
+import (
+    "context"
+    "github.com/tendant/simple-content-pipeline/pkg/client"
+    "github.com/tendant/simple-content-pipeline/pkg/pipeline"
+)
+
+// Create client
+c := client.New("http://localhost:8080")
+
+// Trigger processing
+req := pipeline.ProcessRequest{
+    ContentID: "content-123",
+    ObjectKey: "uploads/photo.jpg",
+    Job:       pipeline.JobThumbnail,
+    Versions: map[string]int{
+        pipeline.DerivedTypeThumbnail: 1,
+    },
+    Metadata: map[string]string{
+        "mime": "image/jpeg",
+    },
+}
+
+resp, err := c.Process(context.Background(), req)
+```
 
 ---
 
