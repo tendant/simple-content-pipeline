@@ -1,5 +1,6 @@
 # Binaries
 /pipeline-worker
+/trigger
 /cmd/pipeline-worker/pipeline-worker
 *.exe
 *.exe~
@@ -35,3 +36,4 @@ Thumbs.db
 /data/
 *.db
 *.sqlite
+
