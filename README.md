@@ -375,24 +375,39 @@ Same container image can be reused across environments.
 - ✅ Basic project structure
 - ⏸️ DBOS integration (deferred to M2)
 
-### M2 — Dedupe Ledger
+### M2 — Dedupe Ledger (DEFERRED)
 
-- Add `process_dedupe` migration
-- Implement RecordDedupe step
+- ⏸️ Add `process_dedupe` migration (deferred - no DB tracking for now)
+- ⏸️ Implement RecordDedupe step (deferred)
 
-### M3 — Storage + Artifacts
+### M3 — Storage + Artifacts ✅ COMPLETE
 
-- S3 + local FS support
-- Deterministic artifact writer
+- ✅ Filesystem storage reader (`internal/storage`)
+- ✅ Storage interface (`Reader`, `ReaderWithMetadata`)
+- ✅ Path traversal security checks
+- ⏸️ S3 storage reader (deferred)
+- ⏸️ Integration with simple-content for derived outputs (next)
 
-### M4 — First Pipeline
+### M4 — First Pipeline (Thumbnail) ✅ COMPLETE
 
-- `image:v1`: metadata + thumbnail
+- ✅ Workflow runner framework
+- ✅ Thumbnail workflow implementation
+- ✅ Request validation
+- ✅ Source content verification via simple-content
+- ✅ **Integration with simple-content via HTTP API**
+  - ✅ HTTPContentReader for downloads
+  - ✅ HTTPDerivedWriter for uploads
+  - ✅ Supports both HTTP and embedded modes
+- ✅ Derived content persistence via simple-content
+- ⏸️ Actual image thumbnail generation (placeholder - using source as-is)
 
-### M5 — App Integration
+### M5 — App Integration ✅ COMPLETE
 
-- App triggers pipeline after upload
-- Store `run_id` with content metadata
+- ✅ HTTP API architecture (pipeline worker connects to simple-content server)
+- ✅ App uploads content to simple-content
+- ✅ App triggers pipeline via HTTP POST
+- ✅ Pipeline processes and stores derived content back to simple-content
+- ⏸️ Store `run_id` with content metadata (future enhancement)
 
 ---
 
@@ -408,7 +423,45 @@ Same container image can be reused across environments.
 
 ---
 
-## 12. Quick Start
+## 12. Architecture Notes
+
+### simple-content Integration
+
+The pipeline worker uses `simple-content` library for all content operations:
+
+- **ContentReader**: Reads source content via `simple-content.Service.DownloadContent()`
+- **DerivedWriter**: Writes derived content via `simple-content.Service.UploadDerivedContent()`
+- **No direct storage access**: All storage operations go through simple-content
+
+**Architecture Modes:**
+
+The pipeline worker supports two modes for accessing simple-content:
+
+1. **HTTP API Mode** (recommended):
+   ```
+   App → simple-content HTTP Server
+             ↑
+   Pipeline Worker (HTTP client)
+   ```
+   - Set `CONTENT_API_URL=http://localhost:4000`
+   - Worker uses HTTP client to call simple-content API
+   - No shared database needed - all state in content service
+   - **Best for production and testing**
+
+2. **Embedded Mode** (development only):
+   ```
+   Pipeline Worker (embedded simple-content instance)
+   ```
+   - No `CONTENT_API_URL` set
+   - Worker embeds simple-content library directly
+   - Uses development preset (in-memory DB + filesystem storage)
+   - **For quick testing of worker-only features**
+
+**Storage:**
+- simple-content handles all storage (database + files)
+- Pipeline worker is stateless - just processes content via API
+
+## 13. Quick Start
 
 ### Build and Run
 
@@ -425,22 +478,47 @@ go run ./cmd/pipeline-worker
 
 **Configuration:**
 - `PIPELINE_HTTP_ADDR` - HTTP listen address (default: `:8080`)
+- `CONTENT_API_URL` - simple-content HTTP API base URL (if set, uses HTTP mode; if empty, uses embedded mode)
+  - Example: `http://localhost:4000`
 
-### Test with Example
+### Test with HTTP API Mode (Recommended)
 
 ```bash
-# In terminal 1: Start the worker
-go run ./cmd/pipeline-worker
+# Terminal 1: Start simple-content server (in simple-content repo)
+cd ../simple-content
+go run ./cmd/server-configured
 
-# In terminal 2: Trigger processing
+# Terminal 2: Start pipeline worker (connects to simple-content API)
+cd ../simple-content-pipeline
+CONTENT_API_URL=http://localhost:4000 go run ./cmd/pipeline-worker
+
+# Terminal 3: Run example (uploads content and triggers pipeline)
 go run ./examples/trigger/main.go
 ```
 
 Expected output:
 ```
+Step 1: Uploading content to simple-content...
+✓ Content uploaded: c1acef84-e0a8-4f72-a75c-665ec1d5b8ed
+
+Step 2: Triggering thumbnail generation...
 ✓ Processing triggered successfully
-  Run ID: 54b579ef-1260-4773-a5a3-d6d27fa86df0
+  Run ID: ed1f0628-740f-41c3-a938-e659eb4181f5
   Dedupe seen count: 0
+
+Step 3: Checking derived content...
+✓ Found 1 derived content(s):
+  - Type: thumbnail, Variant: thumbnail_v1
+```
+
+### Test with Embedded Mode (Quick Dev Tests)
+
+```bash
+# Single terminal: Worker runs standalone
+go run ./cmd/pipeline-worker
+
+# Note: Example won't work in this mode (separate instances)
+# This mode is for testing worker features in isolation
 ```
 
 ### Using the Client Library

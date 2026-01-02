@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +13,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tendant/simple-content/pkg/simplecontent/presets"
+	"github.com/tendant/simple-content-pipeline/internal/storage"
+	"github.com/tendant/simple-content-pipeline/internal/workflows"
 	"github.com/tendant/simple-content-pipeline/pkg/pipeline"
 )
 
@@ -22,12 +26,56 @@ func main() {
 		httpAddr = ":8080"
 	}
 
+	// Initialize content reader and derived writer
+	// Use HTTP API if CONTENT_API_URL is set, otherwise use embedded service
+	contentAPIURL := os.Getenv("CONTENT_API_URL")
+
+	var contentReader interface {
+		GetReaderByContentID(ctx context.Context, contentID string) (io.ReadCloser, error)
+		Exists(ctx context.Context, key string) (bool, error)
+	}
+	var derivedWriter interface {
+		HasDerived(ctx context.Context, contentID string, derivedType string, derivedVersion int) (bool, error)
+		PutDerived(ctx context.Context, contentID string, derivedType string, derivedVersion int, r io.Reader, meta map[string]string) (string, error)
+	}
+	var cleanup func()
+
+	if contentAPIURL != "" {
+		log.Printf("Using simple-content HTTP API at: %s", contentAPIURL)
+		contentReader = storage.NewHTTPContentReader(contentAPIURL)
+		derivedWriter = storage.NewHTTPDerivedWriter(contentAPIURL)
+		cleanup = func() {} // No cleanup needed for HTTP client
+	} else {
+		log.Printf("Using embedded simple-content service (development preset)")
+		svc, cleanupFn, err := presets.NewDevelopment()
+		if err != nil {
+			log.Fatalf("Failed to initialize simple-content service: %v", err)
+		}
+		contentReader = storage.NewContentReader(svc)
+		derivedWriter = storage.NewDerivedWriter(svc)
+		cleanup = cleanupFn
+	}
+	defer cleanup()
+
+	// Initialize workflow runner
+	workflowRunner := workflows.NewWorkflowRunner()
+
+	// Register workflows
+	thumbnailWorkflow := workflows.NewThumbnailWorkflow(contentReader, derivedWriter)
+	workflowRunner.Register(pipeline.JobThumbnail, thumbnailWorkflow)
+	log.Printf("Registered workflow: %s for job: %s", thumbnailWorkflow.Name(), pipeline.JobThumbnail)
+
 	// Create HTTP server
 	mux := http.NewServeMux()
 
+	// Create handler with dependencies
+	handler := &Handler{
+		workflowRunner: workflowRunner,
+	}
+
 	// Register handlers
 	mux.HandleFunc("/health", handleHealth)
-	mux.HandleFunc("/v1/process", handleProcess)
+	mux.HandleFunc("/v1/process", handler.handleProcess)
 
 	server := &http.Server{
 		Addr:    httpAddr,
@@ -69,8 +117,13 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Handler holds dependencies for HTTP handlers
+type Handler struct {
+	workflowRunner *workflows.WorkflowRunner
+}
+
 // handleProcess handles the /v1/process endpoint
-func handleProcess(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleProcess(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -93,20 +146,38 @@ func handleProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Processing request: content_id=%s, job=%s", req.ContentID, req.Job)
+	log.Printf("Processing request: content_id=%s, job=%s, object_key=%s", req.ContentID, req.Job, req.ObjectKey)
 
-	// TODO: Start DBOS workflow
-	// For now, generate a mock run ID
+	// Generate run ID
 	runID := uuid.New().String()
 
-	// TODO: Track dedupe count
-	// For now, return 0
-	dedupeSeenCount := 0
+	// Create workflow context
+	wctx := &workflows.WorkflowContext{
+		Ctx:     r.Context(),
+		Request: req,
+		RunID:   runID,
+	}
+
+	// Execute workflow
+	result, err := h.workflowRunner.Run(wctx)
+	if err != nil {
+		log.Printf("[%s] Workflow execution failed: %v", runID, err)
+		http.Error(w, fmt.Sprintf("Workflow execution failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if !result.Success {
+		log.Printf("[%s] Workflow completed with errors: %v", runID, result.Error)
+		http.Error(w, fmt.Sprintf("Workflow failed: %v", result.Error), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("[%s] Workflow completed successfully", runID)
 
 	// Return response
 	resp := pipeline.ProcessResponse{
 		RunID:           runID,
-		DedupeSeenCount: dedupeSeenCount,
+		DedupeSeenCount: 0, // TODO: Track dedupe count
 	}
 
 	w.Header().Set("Content-Type", "application/json")
