@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	"github.com/tendant/simple-content/pkg/simplecontent"
 	"github.com/tendant/simple-content/pkg/simplecontent/presets"
 	"github.com/tendant/simple-content-pipeline/internal/dbosruntime"
@@ -27,6 +28,9 @@ import (
 // Uses embedded simple-content service (in-memory DB + filesystem storage)
 // No external dependencies required
 func main() {
+	// Load .env file if it exists (silently ignore if not found)
+	_ = godotenv.Load()
+
 	// Command-line flags
 	portFlag := flag.String("port", "", "HTTP port (default: 8080)")
 	storageDirFlag := flag.String("data-dir", "", "Storage directory (default: ./dev-data)")

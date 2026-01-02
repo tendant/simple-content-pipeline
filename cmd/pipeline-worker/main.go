@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 	"github.com/tendant/simple-content-pipeline/internal/dbosruntime"
 	"github.com/tendant/simple-content-pipeline/internal/handlers"
 	"github.com/tendant/simple-content-pipeline/internal/storage"
@@ -22,6 +23,9 @@ import (
 )
 
 func main() {
+	// Load .env file if it exists (silently ignore if not found)
+	_ = godotenv.Load()
+
 	// Configuration from environment
 	httpAddr := os.Getenv("PIPELINE_HTTP_ADDR")
 	if httpAddr == "" {
