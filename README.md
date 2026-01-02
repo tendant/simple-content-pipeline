@@ -24,7 +24,64 @@
 
 ---
 
-## 2. Trigger Model
+## 2. Quick Start
+
+### As a Standalone Service
+
+```bash
+# Start PostgreSQL
+make postgres-start
+
+# Run the all-in-one server
+./pipeline-standalone
+
+# Test it
+./test-upload.sh
+```
+
+See [examples/upload-test/README.md](examples/upload-test/README.md) for more testing options.
+
+### As a Library in Your Application
+
+```bash
+go get github.com/tendant/simple-content-pipeline
+```
+
+```go
+import (
+    "github.com/tendant/simple-content-pipeline/internal/dbosruntime"
+    "github.com/tendant/simple-content-pipeline/internal/workflows"
+    "github.com/tendant/simple-content-pipeline/pkg/pipeline"
+)
+
+// Initialize pipeline
+dbosRuntime, _ := dbosruntime.NewRuntime(ctx, dbosruntime.Config{
+    DatabaseURL: "postgresql://...",
+    AppName:     "my-app",
+})
+
+runner := workflows.NewWorkflowRunner(dbosRuntime)
+runner.Register(pipeline.JobThumbnail, thumbnailWorkflow)
+dbosRuntime.Launch()
+
+// Trigger workflow
+runID, _ := runner.RunAsync(ctx, pipeline.ProcessRequest{
+    ContentID: "content-id",
+    Job:       pipeline.JobThumbnail,
+    Versions:  map[string]int{"thumbnail": 1},
+})
+```
+
+**See:**
+- [LIBRARY_USAGE.md](LIBRARY_USAGE.md) - Complete integration guide
+- [API.md](API.md) - API reference
+- [HOOKS.md](HOOKS.md) - Automatic workflow triggering
+- [examples/library-integration/](examples/library-integration/) - Integration example
+- [examples/hooks/](examples/hooks/) - Hook examples
+
+---
+
+## 3. Trigger Model
 
 ### Trigger Endpoint (Worker)
 
@@ -71,7 +128,7 @@ Notes:
 
 ---
 
-## 3. Duplicate Detection Strategy
+## 4. Duplicate Detection Strategy
 
 ### Summary
 
@@ -117,7 +174,7 @@ Insert behavior:
 
 ---
 
-## 4. Workflow Design (DBOS)
+## 5. Workflow Design (DBOS)
 
 ### Workflow Naming (job-specific)
 
@@ -222,7 +279,7 @@ This enables:
 
 ---
 
-## 5. Derived Content & Artifact Management (via `simple-content`)
+## 6. Derived Content & Artifact Management (via `simple-content`)
 
 **Decision:** The pipeline worker does **not** write artifacts directly to storage paths. Instead, it calls the `simple-content` library/service to create and manage **Derived Content** records and storage.
 
@@ -268,7 +325,7 @@ This can be enforced in `simple-content` (unique index) or implemented as an ups
 
 ---
 
-## 6. Repository Layout
+## 7. Repository Layout
 
 ```
 simple-content-pipeline/
@@ -299,7 +356,7 @@ simple-content-pipeline/
 
 ---
 
-## 7. Public Go Interfaces
+## 8. Public Go Interfaces
 
 ### Pipeline Client (used by app)
 
@@ -335,7 +392,7 @@ type DerivedWriter interface {
 
 ---
 
-## 8. Worker Runtime Configuration
+## 9. Worker Runtime Configuration
 
 Environment variables:
 
@@ -347,7 +404,7 @@ Environment variables:
 
 ---
 
-## 9. Deployment Model
+## 10. Deployment Model
 
 - App deployment:
 
@@ -364,7 +421,7 @@ Same container image can be reused across environments.
 
 ---
 
-## 10. Milestones
+## 11. Milestones
 
 ### M1 — Skeleton ✅ COMPLETE
 
@@ -411,7 +468,7 @@ Same container image can be reused across environments.
 
 ---
 
-## 11. Design Principles
+## 12. Design Principles
 
 - Build once, reuse everywhere
 - DBOS is an implementation detail
@@ -423,7 +480,7 @@ Same container image can be reused across environments.
 
 ---
 
-## 12. Architecture Notes
+## 13. Architecture Notes
 
 ### simple-content Integration
 
@@ -461,7 +518,7 @@ The pipeline worker supports two modes for accessing simple-content:
 - simple-content handles all storage (database + files)
 - Pipeline worker is stateless - just processes content via API
 
-## 13. Quick Start
+## 14. Deployment Modes & Setup
 
 ### Deployment Modes Comparison
 
