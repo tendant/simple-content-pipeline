@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -24,13 +25,28 @@ import (
 // Uses in-memory repository + filesystem storage (./dev-data)
 // No external simple-content server needed
 func main() {
-	// Configuration from environment
-	httpAddr := os.Getenv("PIPELINE_HTTP_ADDR")
+	// Command-line flags
+	portFlag := flag.String("port", "", "HTTP port (default: 8080)")
+	storageDirFlag := flag.String("data-dir", "", "Storage directory (default: ./dev-data)")
+	flag.Parse()
+
+	// Configuration priority: CLI args > environment variables > defaults
+	httpAddr := *portFlag
+	if httpAddr == "" {
+		httpAddr = os.Getenv("PIPELINE_HTTP_ADDR")
+	}
 	if httpAddr == "" {
 		httpAddr = ":8080"
 	}
+	// Ensure address has colon prefix
+	if httpAddr[0] != ':' {
+		httpAddr = ":" + httpAddr
+	}
 
-	storageDir := os.Getenv("STORAGE_DIR")
+	storageDir := *storageDirFlag
+	if storageDir == "" {
+		storageDir = os.Getenv("STORAGE_DIR")
+	}
 	if storageDir == "" {
 		storageDir = "./dev-data"
 	}
@@ -85,10 +101,16 @@ func main() {
 
 	// Start server in goroutine
 	go func() {
+		// Extract port number for display (remove leading colon)
+		displayPort := httpAddr
+		if displayPort[0] == ':' {
+			displayPort = displayPort[1:]
+		}
+
 		log.Printf("✓ Pipeline worker ready on %s", httpAddr)
 		log.Printf("")
 		log.Printf("Quick test:")
-		log.Printf("  curl http://localhost:8080/v1/test")
+		log.Printf("  curl http://localhost:%s/v1/test", displayPort)
 		log.Printf("")
 		log.Printf("Available endpoints:")
 		log.Printf("  GET  /health           - Health check")

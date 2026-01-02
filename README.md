@@ -533,6 +533,9 @@ For the fastest testing with in-memory DB + filesystem storage:
 # Single terminal: All-in-one worker with test endpoint
 go run ./cmd/pipeline-standalone
 
+# With custom port and data directory:
+go run ./cmd/pipeline-standalone -port 9000 -data-dir /tmp/pipeline-data
+
 # In another terminal: Run quick test
 curl http://localhost:8080/v1/test
 ```
@@ -557,8 +560,12 @@ Step 3: Checking derived content...
 - Perfect for quick iteration and testing
 
 **Configuration:**
-- `PIPELINE_HTTP_ADDR` - HTTP address (default: `:8080`)
-- `STORAGE_DIR` - Storage directory (default: `./dev-data`)
+- CLI: `-port <port>` - HTTP port (default: `8080`)
+- CLI: `-data-dir <path>` - Storage directory (default: `./dev-data`)
+- ENV: `PIPELINE_HTTP_ADDR` - HTTP address (overridden by -port flag)
+- ENV: `STORAGE_DIR` - Storage directory (overridden by -data-dir flag)
+
+**Priority:** CLI args > environment variables > defaults
 
 ### Test with Embedded Mode (Quick Dev Tests)
 
