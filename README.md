@@ -467,51 +467,52 @@ The pipeline worker supports two modes for accessing simple-content:
 
 | Mode | Setup Complexity | Use Case | Processes | Database | Storage |
 |------|-----------------|----------|-----------|----------|---------|
-| **Standalone** | ⭐ Easiest | Quick testing, development | 2 | In-memory | Filesystem |
+| **Standalone** | ⭐ Easiest | Quick testing, development | 1 | In-memory | Filesystem |
 | **HTTP API** | ⭐⭐ Medium | Production-like testing | 3 | PostgreSQL/In-memory | Any |
-| **Embedded** | ⭐⭐⭐ Complex | Worker isolation testing | 1+ | In-memory (per process) | Filesystem |
 
-**Standalone Architecture:** 2 processes sharing data via HTTP
-- Process 1: `simple-content/cmd/standalone-server` (port 4000)
-- Process 2: `simple-content-pipeline/cmd/pipeline-standalone` (port 8080)
+**Standalone Architecture:** Single process with embedded simple-content service
+- `simple-content-pipeline/cmd/pipeline-standalone` (port 8080)
+  - Embeds simple-content service (in-memory DB + filesystem storage)
+  - Includes workflow execution
+  - Zero external dependencies
+  - Built-in test endpoint
 
-**Recommendation:** Start with **Standalone** for quick iteration (no database needed), move to **HTTP API** for production-like testing.
+**HTTP API Architecture:** Separate processes for content management and pipeline
+- Process 1: `simple-content/cmd/server-configured` (port 4000)
+- Process 2: `simple-content-pipeline/cmd/pipeline-worker` (port 8080)
+- Process 3: Your application or test client
+
+**Recommendation:** Start with **Standalone** for quick iteration (single process, no setup needed), move to **HTTP API** for production-like testing.
 
 ### Build and Run
 
 ```bash
-# Build simple-content standalone server
-cd ../simple-content
-go build -o standalone-server ./cmd/standalone-server
-
-# Build pipeline standalone worker
-cd ../simple-content-pipeline
+# Build pipeline standalone (embedded mode)
+cd simple-content-pipeline
 go build -o pipeline-standalone ./cmd/pipeline-standalone
 
 # Build HTTP-mode worker (for production-like testing)
 go build -o pipeline-worker ./cmd/pipeline-worker
 ```
 
-**Running Standalone Mode:**
+**Running Standalone Mode (Single Process):**
 ```bash
-# Terminal 1: simple-content server
-cd ../simple-content
-./standalone-server
-# Or: go run ./cmd/standalone-server
-
-# Terminal 2: pipeline worker
-cd ../simple-content-pipeline
+# Just one terminal needed!
+cd simple-content-pipeline
 ./pipeline-standalone
-# Or: go run ./cmd/pipeline-standalone
+
+# Or with custom settings:
+./pipeline-standalone -port 8081 -data-dir ./my-data
+
+# Or using go run:
+go run ./cmd/pipeline-standalone
 ```
 
 **Configuration:**
 
 *For Standalone Mode:*
-- simple-content server: See simple-content/cmd/README.md
-- pipeline worker:
-  - `-port` / `PIPELINE_HTTP_ADDR` - HTTP address (default: `:8080`)
-  - `-content-api` / `CONTENT_API_URL` - simple-content API URL (default: `http://localhost:4000`)
+- `-port` / `PIPELINE_HTTP_ADDR` - HTTP address (default: `:8080`)
+- `-data-dir` / `STORAGE_DIR` - Storage directory (default: `./dev-data`)
 
 *For HTTP API Mode:*
 - `CONTENT_API_URL` - simple-content HTTP API base URL
@@ -547,32 +548,24 @@ Step 3: Checking derived content...
   - Type: thumbnail, Variant: thumbnail_v1
 ```
 
-### Test with Standalone Mode (Quickest - Two Processes)
+### Test with Standalone Mode (Quickest - Single Process)
 
 For the fastest testing with in-memory DB + filesystem storage (no database setup required):
 
 ```bash
-# Terminal 1: Start simple-content standalone server
-cd ../simple-content
-go run ./cmd/standalone-server
-# Server starts on port 4000
-
-# Terminal 2: Start pipeline standalone worker
-cd ../simple-content-pipeline
+# Just one terminal needed!
+cd simple-content-pipeline
 go run ./cmd/pipeline-standalone
-# Worker starts on port 8080, connects to simple-content at localhost:4000
+# Server starts on port 8080 with embedded simple-content service
 
-# Terminal 3: Run the full integration example
-go run ./examples/trigger/main.go
+# Test the built-in endpoint:
+curl http://localhost:8080/v1/test
 ```
 
-**With custom ports:**
+**With custom settings:**
 ```bash
-# Terminal 1: simple-content on port 5000
-go run ./cmd/standalone-server -port 5000 -data-dir /tmp/content-data
-
-# Terminal 2: pipeline worker on port 9000, pointing to simple-content at 5000
-go run ./cmd/pipeline-standalone -port 9000 -content-api http://localhost:5000
+# Custom port and data directory
+go run ./cmd/pipeline-standalone -port 9000 -data-dir /tmp/my-pipeline-data
 ```
 
 Expected output:
@@ -590,48 +583,39 @@ Step 3: Checking derived content...
 
 **Architecture:**
 ```
-┌─────────────────────────┐         ┌──────────────────────────┐
-│ simple-content          │         │ pipeline-standalone      │
-│ standalone-server       │◄────────┤ (HTTP client)            │
-│ (port 4000)             │  HTTP   │ (port 8080)              │
-│                         │         │                          │
-│ - In-memory DB          │         │ - Workflow execution     │
-│ - Filesystem storage    │         │ - Content processing     │
-└─────────────────────────┘         └──────────────────────────┘
+┌───────────────────────────────────────────────┐
+│ pipeline-standalone (port 8080)               │
+│                                               │
+│  ┌─────────────────────────────────────────┐ │
+│  │ Embedded simple-content Service         │ │
+│  │  - In-memory repository                 │ │
+│  │  - Filesystem storage (./dev-data)      │ │
+│  └─────────────────────────────────────────┘ │
+│                                               │
+│  ┌─────────────────────────────────────────┐ │
+│  │ Pipeline Workflows                      │ │
+│  │  - Thumbnail generation                 │ │
+│  │  - Content processing                   │ │
+│  └─────────────────────────────────────────┘ │
+│                                               │
+└───────────────────────────────────────────────┘
 ```
 
 **Features:**
-- **simple-content**: In-memory repository + filesystem storage
-- **pipeline-standalone**: HTTP client, no embedded service
-- Two separate processes with clear separation of concerns
-- Built-in test endpoint
-- Perfect for quick iteration and testing
+- **Single process**: Everything embedded (simple-content + pipeline)
+- **Zero dependencies**: No database, no external services
+- **Built-in test endpoint**: `/v1/test` for instant validation
+- **Perfect for quick iteration**: Start with one command
 
 **Configuration:**
 
-*simple-content standalone-server:*
-- CLI: `-port <port>` - HTTP port (default: `4000`)
+*pipeline-standalone:*
+- CLI: `-port <port>` - HTTP port (default: `8080`)
 - CLI: `-data-dir <path>` - Storage directory (default: `./dev-data`)
-- ENV: `PORT` - HTTP port (overridden by -port flag)
+- ENV: `PIPELINE_HTTP_ADDR` - HTTP address (overridden by -port flag)
 - ENV: `STORAGE_DIR` - Storage directory (overridden by -data-dir flag)
 
-*pipeline-standalone worker:*
-- CLI: `-port <port>` - HTTP port (default: `8080`)
-- CLI: `-content-api <url>` - simple-content API URL (default: `http://localhost:4000`)
-- ENV: `PIPELINE_HTTP_ADDR` - HTTP address (overridden by -port flag)
-- ENV: `CONTENT_API_URL` - simple-content API URL (overridden by -content-api flag)
-
 **Priority:** CLI args > environment variables > defaults
-
-### Test with Embedded Mode (Quick Dev Tests)
-
-```bash
-# Single terminal: Worker runs standalone
-go run ./cmd/pipeline-worker
-
-# Note: Example won't work in this mode (separate instances)
-# This mode is for testing worker features in isolation
-```
 
 ### Using the Client Library
 

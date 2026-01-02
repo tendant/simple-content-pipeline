@@ -13,17 +13,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/tendant/simple-content/pkg/simplecontent/presets"
 	"github.com/tendant/simple-content-pipeline/internal/storage"
 	"github.com/tendant/simple-content-pipeline/internal/workflows"
 	"github.com/tendant/simple-content-pipeline/pkg/pipeline"
+	"github.com/tendant/simple-content/pkg/simplecontent/presets"
 )
 
 func main() {
 	// Configuration from environment
 	httpAddr := os.Getenv("PIPELINE_HTTP_ADDR")
 	if httpAddr == "" {
-		httpAddr = ":8080"
+		httpAddr = ":8081"
 	}
 
 	// Initialize content reader and derived writer

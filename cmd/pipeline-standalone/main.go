@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -15,18 +14,20 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tendant/simple-content/pkg/simplecontent"
+	"github.com/tendant/simple-content/pkg/simplecontent/presets"
 	"github.com/tendant/simple-content-pipeline/internal/storage"
 	"github.com/tendant/simple-content-pipeline/internal/workflows"
 	"github.com/tendant/simple-content-pipeline/pkg/pipeline"
 )
 
 // Standalone pipeline worker for quick testing
-// Connects to simple-content standalone-server via HTTP
-// Requires: simple-content/cmd/standalone-server running
+// Uses embedded simple-content service (in-memory DB + filesystem storage)
+// No external dependencies required
 func main() {
 	// Command-line flags
 	portFlag := flag.String("port", "", "HTTP port (default: 8080)")
-	contentAPIFlag := flag.String("content-api", "", "simple-content API URL (default: http://localhost:4000)")
+	storageDirFlag := flag.String("data-dir", "", "Storage directory (default: ./dev-data)")
 	flag.Parse()
 
 	// Configuration priority: CLI args > environment variables > defaults
@@ -42,31 +43,33 @@ func main() {
 		httpAddr = ":" + httpAddr
 	}
 
-	contentAPIURL := *contentAPIFlag
-	if contentAPIURL == "" {
-		contentAPIURL = os.Getenv("CONTENT_API_URL")
+	storageDir := *storageDirFlag
+	if storageDir == "" {
+		storageDir = os.Getenv("STORAGE_DIR")
 	}
-	if contentAPIURL == "" {
-		contentAPIURL = "http://localhost:4000"
+	if storageDir == "" {
+		storageDir = "./dev-data"
 	}
 
 	log.Printf("Pipeline Standalone Worker")
-	log.Printf("  Mode: HTTP client to simple-content standalone-server")
-	log.Printf("  Content API: %s", contentAPIURL)
+	log.Printf("  Mode: Embedded (in-memory DB + filesystem storage)")
+	log.Printf("  Storage directory: %s", storageDir)
 	log.Printf("  HTTP address: %s", httpAddr)
-	log.Printf("")
-	log.Printf("Prerequisites:")
-	log.Printf("  1. Start simple-content server:")
-	log.Printf("     cd ../simple-content && go run ./cmd/standalone-server")
-	log.Printf("  2. Verify content API is accessible:")
-	log.Printf("     curl %s/health", contentAPIURL)
-	log.Printf("")
 
-	// Initialize content reader and derived writer via HTTP
-	contentReader := storage.NewHTTPContentReader(contentAPIURL)
-	derivedWriter := storage.NewHTTPDerivedWriter(contentAPIURL)
+	// Initialize embedded simple-content service
+	svc, cleanup, err := presets.NewDevelopment(
+		presets.WithDevStorage(storageDir),
+	)
+	if err != nil {
+		log.Fatalf("Failed to initialize service: %v", err)
+	}
+	defer cleanup()
 
-	log.Printf("✓ HTTP client initialized")
+	log.Printf("✓ simple-content service initialized")
+
+	// Initialize content reader and derived writer with embedded service
+	contentReader := storage.NewContentReader(svc)
+	derivedWriter := storage.NewDerivedWriter(svc)
 
 	// Initialize workflow runner
 	workflowRunner := workflows.NewWorkflowRunner()
@@ -82,7 +85,7 @@ func main() {
 	// Create handler with dependencies
 	handler := &Handler{
 		workflowRunner: workflowRunner,
-		contentAPIURL:  contentAPIURL,
+		service:        svc,
 	}
 
 	// Register handlers
@@ -105,7 +108,7 @@ func main() {
 
 		log.Printf("✓ Pipeline worker ready on %s", httpAddr)
 		log.Printf("")
-		log.Printf("Quick test (after starting simple-content server):")
+		log.Printf("Quick test:")
 		log.Printf("  curl http://localhost:%s/v1/test", displayPort)
 		log.Printf("")
 		log.Printf("Available endpoints:")
@@ -113,6 +116,11 @@ func main() {
 		log.Printf("  POST /v1/process       - Process content (requires existing content_id)")
 		log.Printf("  GET  /v1/test          - Run end-to-end test (upload + process + verify)")
 		log.Printf("  POST /v1/test          - Run end-to-end test")
+		log.Printf("")
+		log.Printf("For production-like testing with separate processes:")
+		log.Printf("  Terminal 1: cd ../simple-content && go run ./cmd/server-configured")
+		log.Printf("  Terminal 2: CONTENT_API_URL=http://localhost:4000 go run ./cmd/pipeline-worker")
+		log.Printf("  Terminal 3: go run ./examples/trigger/main.go")
 		log.Printf("")
 
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -151,7 +159,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 // Handler holds dependencies for HTTP handlers
 type Handler struct {
 	workflowRunner *workflows.WorkflowRunner
-	contentAPIURL  string
+	service        simplecontent.Service
 }
 
 // handleProcess handles the /v1/process endpoint
@@ -227,64 +235,26 @@ func (h *Handler) handleTest(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	log.Println("=== Running End-to-End Test ===")
 
-	// Step 1: Upload test content via simple-content HTTP API
-	log.Println("Step 1: Uploading test content to simple-content...")
+	// Step 1: Upload test content
+	log.Println("Step 1: Uploading test content...")
 	testData := []byte("This is a test image file for thumbnail generation")
 
-	// Create upload request
-	uploadReq := map[string]interface{}{
-		"owner_id":      "00000000-0000-0000-0000-000000000001",
-		"tenant_id":     "00000000-0000-0000-0000-000000000002",
-		"name":          "Test Image",
-		"document_type": "image/jpeg",
-		"file_name":     "test-image.jpg",
-		"tags":          []string{"test", "image"},
-		"content_data":  string(testData),
-	}
-
-	jsonData, err := json.Marshal(uploadReq)
-	if err != nil {
-		log.Printf("Failed to marshal upload request: %v", err)
-		http.Error(w, fmt.Sprintf("Marshal failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Call simple-content API to upload
-	uploadURL := fmt.Sprintf("%s/api/v1/contents", h.contentAPIURL)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, bytes.NewReader(jsonData))
-	if err != nil {
-		log.Printf("Failed to create upload request: %v", err)
-		http.Error(w, fmt.Sprintf("Request creation failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(httpReq)
+	content, err := h.service.UploadContent(ctx, simplecontent.UploadContentRequest{
+		OwnerID:      uuid.MustParse("00000000-0000-0000-0000-000000000001"),
+		TenantID:     uuid.MustParse("00000000-0000-0000-0000-000000000002"),
+		Name:         "Test Image",
+		DocumentType: "image/jpeg",
+		Reader:       bytes.NewReader(testData),
+		FileName:     "test-image.jpg",
+		Tags:         []string{"test", "image"},
+	})
 	if err != nil {
 		log.Printf("Failed to upload content: %v", err)
-		http.Error(w, fmt.Sprintf("Upload failed: %v. Is simple-content server running at %s?", err, h.contentAPIURL), http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		log.Printf("Upload failed with status %d: %s", resp.StatusCode, string(bodyBytes))
-		http.Error(w, fmt.Sprintf("Upload failed with status %d", resp.StatusCode), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Upload failed: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	var content map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&content); err != nil {
-		log.Printf("Failed to decode upload response: %v", err)
-		http.Error(w, fmt.Sprintf("Decode failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	contentID := content["id"].(string)
-	contentStatus := content["status"].(string)
-	log.Printf("✓ Content uploaded: %s (status: %s)", contentID, contentStatus)
+	log.Printf("✓ Content uploaded: %s (status: %s)", content.ID, content.Status)
 
 	// Step 2: Trigger thumbnail generation
 	log.Println("Step 2: Triggering thumbnail generation...")
@@ -293,7 +263,7 @@ func (h *Handler) handleTest(w http.ResponseWriter, r *http.Request) {
 	wctx := &workflows.WorkflowContext{
 		Ctx: ctx,
 		Request: pipeline.ProcessRequest{
-			ContentID: contentID,
+			ContentID: content.ID.String(),
 			Job:       pipeline.JobThumbnail,
 			Versions: map[string]int{
 				pipeline.DerivedTypeThumbnail: 1,
@@ -320,45 +290,19 @@ func (h *Handler) handleTest(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("✓ Workflow completed successfully (run_id: %s)", runID)
 
-	// Step 3: List derived content via simple-content HTTP API
+	// Step 3: List derived content
 	log.Println("Step 3: Checking derived content...")
 
-	listURL := fmt.Sprintf("%s/api/v1/contents/%s/derived", h.contentAPIURL, contentID)
-	listReq, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
-	if err != nil {
-		log.Printf("Failed to create list request: %v", err)
-		http.Error(w, fmt.Sprintf("List request failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	listResp, err := client.Do(listReq)
+	derived, err := h.service.ListDerivedContent(ctx, simplecontent.WithParentID(content.ID))
 	if err != nil {
 		log.Printf("Failed to list derived content: %v", err)
 		http.Error(w, fmt.Sprintf("List failed: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer listResp.Body.Close()
-
-	if listResp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(listResp.Body)
-		log.Printf("List failed with status %d: %s", listResp.StatusCode, string(bodyBytes))
-		http.Error(w, fmt.Sprintf("List failed with status %d", listResp.StatusCode), http.StatusInternalServerError)
-		return
-	}
-
-	var derived []map[string]interface{}
-	if err := json.NewDecoder(listResp.Body).Decode(&derived); err != nil {
-		log.Printf("Failed to decode list response: %v", err)
-		http.Error(w, fmt.Sprintf("Decode failed: %v", err), http.StatusInternalServerError)
-		return
-	}
 
 	log.Printf("✓ Found %d derived content(s)", len(derived))
 	for _, d := range derived {
-		derivationType := d["derivation_type"]
-		variant := d["variant"]
-		status := d["status"]
-		log.Printf("  - Type: %v, Variant: %v, Status: %v", derivationType, variant, status)
+		log.Printf("  - Type: %s, Variant: %s, Status: %s", d.DerivationType, d.Variant, d.Status)
 	}
 
 	log.Println("=== Test Complete ===")
@@ -366,7 +310,7 @@ func (h *Handler) handleTest(w http.ResponseWriter, r *http.Request) {
 	// Return test results
 	response := map[string]interface{}{
 		"test_status":      "success",
-		"content_id":       contentID,
+		"content_id":       content.ID.String(),
 		"run_id":           runID,
 		"derived_count":    len(derived),
 		"derived_contents": derived,
