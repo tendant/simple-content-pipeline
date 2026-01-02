@@ -27,7 +27,7 @@ func main() {
 	_ = godotenv.Load()
 
 	// Configuration from environment
-	httpAddr := os.Getenv("PIPELINE_HTTP_ADDR")
+	httpAddr := os.Getenv("WORKER_HTTP_ADDR")
 	if httpAddr == "" {
 		httpAddr = ":8081"
 	}

@@ -39,7 +39,7 @@ func main() {
 	// Configuration priority: CLI args > environment variables > defaults
 	httpAddr := *portFlag
 	if httpAddr == "" {
-		httpAddr = os.Getenv("PIPELINE_HTTP_ADDR")
+		httpAddr = os.Getenv("STANDALONE_HTTP_ADDR")
 	}
 	if httpAddr == "" {
 		httpAddr = ":8080"
