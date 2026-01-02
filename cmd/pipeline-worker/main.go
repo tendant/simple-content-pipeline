@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tendant/simple-content-pipeline/internal/dbosruntime"
+	"github.com/tendant/simple-content-pipeline/internal/handlers"
 	"github.com/tendant/simple-content-pipeline/internal/storage"
 	"github.com/tendant/simple-content-pipeline/internal/workflows"
 	"github.com/tendant/simple-content-pipeline/pkg/pipeline"
@@ -57,25 +59,58 @@ func main() {
 	}
 	defer cleanup()
 
-	// Initialize workflow runner
-	workflowRunner := workflows.NewWorkflowRunner()
+	// Initialize DBOS runtime (required)
+	dbURL := os.Getenv("DBOS_SYSTEM_DATABASE_URL")
+	if dbURL == "" {
+		log.Fatalf("DBOS_SYSTEM_DATABASE_URL is required")
+	}
+
+	queueName := os.Getenv("DBOS_QUEUE_NAME")
+	if queueName == "" {
+		queueName = "default"
+	}
+
+	dbosRuntime, err := dbosruntime.NewRuntime(context.Background(), dbosruntime.Config{
+		DatabaseURL: dbURL,
+		AppName:     "pipeline-worker",
+		QueueName:   queueName,
+		Concurrency: 4, // TODO: read from env
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize DBOS: %v", err)
+	}
+
+	// Initialize workflow runner with DBOS support (registers workflows with DBOS)
+	workflowRunner := workflows.NewWorkflowRunner(dbosRuntime)
 
 	// Register workflows
 	thumbnailWorkflow := workflows.NewThumbnailWorkflow(contentReader, derivedWriter)
 	workflowRunner.Register(pipeline.JobThumbnail, thumbnailWorkflow)
-	log.Printf("Registered workflow: %s for job: %s", thumbnailWorkflow.Name(), pipeline.JobThumbnail)
+	log.Printf("✓ Registered workflow: %s for job: %s", thumbnailWorkflow.Name(), pipeline.JobThumbnail)
+
+	// Launch DBOS (must be done after workflow registration)
+	if err := dbosRuntime.Launch(); err != nil {
+		log.Fatalf("Failed to launch DBOS: %v", err)
+	}
+	defer dbosRuntime.Shutdown(10 * time.Second)
+
+	log.Printf("✓ DBOS runtime initialized")
+	log.Printf("  Database: %s", dbURL)
+	log.Printf("  Queue: %s", dbosRuntime.QueueName())
+	log.Printf("  Concurrency: %d", dbosRuntime.Concurrency())
 
 	// Create HTTP server
 	mux := http.NewServeMux()
 
-	// Create handler with dependencies
-	handler := &Handler{
-		workflowRunner: workflowRunner,
-	}
+	// Create async handler (DBOS-only)
+	asyncHandler := handlers.NewAsyncHandler(workflowRunner)
 
 	// Register handlers
 	mux.HandleFunc("/health", handleHealth)
-	mux.HandleFunc("/v1/process", handler.handleProcess)
+	mux.HandleFunc("/v1/process", asyncHandler.HandleProcessAsync)
+	mux.HandleFunc("/v1/runs/", asyncHandler.HandleStatus)
+
+	log.Printf("✓ Registered async endpoints")
 
 	server := &http.Server{
 		Addr:    httpAddr,
