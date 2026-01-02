@@ -463,23 +463,37 @@ The pipeline worker supports two modes for accessing simple-content:
 
 ## 13. Quick Start
 
+### Deployment Modes Comparison
+
+| Mode | Setup Complexity | Use Case | Processes | Database | Storage |
+|------|-----------------|----------|-----------|----------|---------|
+| **Standalone** | ⭐ Easiest | Quick testing, development | 1 | In-memory | Filesystem |
+| **HTTP API** | ⭐⭐ Medium | Production-like testing | 3 | PostgreSQL/In-memory | Any |
+| **Embedded** | ⭐⭐⭐ Complex | Worker isolation testing | 1+ | In-memory (per process) | Filesystem |
+
+**Recommendation:** Start with **Standalone** for quick iteration, move to **HTTP API** for integration testing.
+
 ### Build and Run
 
 ```bash
-# Build the worker
+# Build the standalone worker
+go build -o pipeline-standalone ./cmd/pipeline-standalone
+
+# Build the HTTP-mode worker
 go build -o pipeline-worker ./cmd/pipeline-worker
 
-# Run the worker
-./pipeline-worker
+# Run standalone (quickest)
+./pipeline-standalone
 
 # Or run directly
-go run ./cmd/pipeline-worker
+go run ./cmd/pipeline-standalone
 ```
 
 **Configuration:**
 - `PIPELINE_HTTP_ADDR` - HTTP listen address (default: `:8080`)
-- `CONTENT_API_URL` - simple-content HTTP API base URL (if set, uses HTTP mode; if empty, uses embedded mode)
+- `CONTENT_API_URL` - simple-content HTTP API base URL (for HTTP mode)
   - Example: `http://localhost:4000`
+- `STORAGE_DIR` - Storage directory for standalone mode (default: `./dev-data`)
 
 ### Test with HTTP API Mode (Recommended)
 
@@ -510,6 +524,41 @@ Step 3: Checking derived content...
 ✓ Found 1 derived content(s):
   - Type: thumbnail, Variant: thumbnail_v1
 ```
+
+### Test with Standalone Mode (Quickest - Single Process)
+
+For the fastest testing with in-memory DB + filesystem storage:
+
+```bash
+# Single terminal: All-in-one worker with test endpoint
+go run ./cmd/pipeline-standalone
+
+# In another terminal: Run quick test
+curl http://localhost:8080/v1/test
+```
+
+Expected output:
+```
+=== Running End-to-End Test ===
+Step 1: Uploading test content...
+✓ Content uploaded: <uuid> (status: uploaded)
+Step 2: Triggering thumbnail generation...
+✓ Workflow completed successfully (run_id: <uuid>)
+Step 3: Checking derived content...
+✓ Found 1 derived content(s)
+  - Type: thumbnail, Variant: thumbnail_v1, Status: processed
+=== Test Complete ===
+```
+
+**Features:**
+- In-memory repository (no database needed)
+- Filesystem storage (./dev-data)
+- Built-in test endpoint
+- Perfect for quick iteration and testing
+
+**Configuration:**
+- `PIPELINE_HTTP_ADDR` - HTTP address (default: `:8080`)
+- `STORAGE_DIR` - Storage directory (default: `./dev-data`)
 
 ### Test with Embedded Mode (Quick Dev Tests)
 
