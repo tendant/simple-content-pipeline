@@ -1,11 +1,18 @@
 package workflows
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/jpeg"
+	_ "image/png"  // Register PNG decoder
+	_ "image/gif"  // Register GIF decoder
 	"io"
 	"log"
+	"strconv"
 
+	"github.com/disintegration/imaging"
 	"github.com/tendant/simple-content-pipeline/pkg/pipeline"
 )
 
@@ -107,17 +114,76 @@ func (w *ThumbnailWorkflow) Execute(wctx *WorkflowContext) (*WorkflowResult, err
 
 	log.Printf("[%s] Source content downloaded successfully", wctx.RunID)
 
-	// Step 5: Generate thumbnail (placeholder for now)
-	// TODO: Implement actual thumbnail generation
-	// For now, we'll just use the source content as-is
-	log.Printf("[%s] Thumbnail generation (placeholder) - using source as-is", wctx.RunID)
+	// Step 5: Generate thumbnail - actual implementation
+	log.Printf("[%s] Starting thumbnail generation", wctx.RunID)
+
+	// Read image data
+	imageData, err := io.ReadAll(reader)
+	if err != nil {
+		log.Printf("[%s] Failed to read image data: %v", wctx.RunID, err)
+		return &WorkflowResult{
+			Success: false,
+			Error:   fmt.Errorf("image read failed: %w", err),
+		}, err
+	}
+
+	// Decode source image
+	img, format, err := image.Decode(bytes.NewReader(imageData))
+	if err != nil {
+		log.Printf("[%s] Failed to decode image: %v", wctx.RunID, err)
+		return &WorkflowResult{
+			Success: false,
+			Error:   fmt.Errorf("image decode failed: %w", err),
+		}, err
+	}
+	log.Printf("[%s] Image decoded successfully, format: %s", wctx.RunID, format)
+
+	// Parse dimensions from metadata (default 300x300)
+	width := 300
+	height := 300
+	if wctx.Request.Metadata != nil {
+		if w, ok := wctx.Request.Metadata["width"]; ok {
+			if wInt, err := strconv.Atoi(w); err == nil && wInt > 0 {
+				width = wInt
+			}
+		}
+		if h, ok := wctx.Request.Metadata["height"]; ok {
+			if hInt, err := strconv.Atoi(h); err == nil && hInt > 0 {
+				height = hInt
+			}
+		}
+	}
+	log.Printf("[%s] Target dimensions: %dx%d", wctx.RunID, width, height)
+
+	// Generate thumbnail using Lanczos resampling
+	thumbnail := imaging.Fit(img, width, height, imaging.Lanczos)
+
+	// Get actual dimensions
+	bounds := thumbnail.Bounds()
+	actualWidth := bounds.Dx()
+	actualHeight := bounds.Dy()
+	log.Printf("[%s] Thumbnail generated: %dx%d", wctx.RunID, actualWidth, actualHeight)
+
+	// Encode as JPEG with quality 80
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, thumbnail, &jpeg.Options{Quality: 80}); err != nil {
+		log.Printf("[%s] Failed to encode JPEG: %v", wctx.RunID, err)
+		return &WorkflowResult{
+			Success: false,
+			Error:   fmt.Errorf("JPEG encode failed: %w", err),
+		}, err
+	}
+	log.Printf("[%s] Thumbnail encoded as JPEG, size: %d bytes", wctx.RunID, buf.Len())
 
 	// Step 6: Write derived content
 	meta := map[string]string{
-		"file_name": fmt.Sprintf("thumbnail_v%d.jpg", derivedVersion),
+		"file_name":  fmt.Sprintf("thumbnail_v%d.jpg", derivedVersion),
+		"width":      strconv.Itoa(actualWidth),
+		"height":     strconv.Itoa(actualHeight),
+		"mime_type":  "image/jpeg",
 	}
 
-	derivedID, err := w.derivedWriter.PutDerived(wctx.Ctx, wctx.Request.ContentID, derivedType, derivedVersion, reader, meta)
+	derivedID, err := w.derivedWriter.PutDerived(wctx.Ctx, wctx.Request.ContentID, derivedType, derivedVersion, &buf, meta)
 	if err != nil {
 		log.Printf("[%s] Failed to write derived content: %v", wctx.RunID, err)
 		return &WorkflowResult{

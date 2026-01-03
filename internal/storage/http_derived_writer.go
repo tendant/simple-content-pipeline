@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 )
 
@@ -30,7 +31,7 @@ func (dw *HTTPDerivedWriter) HasDerived(ctx context.Context, contentID string, d
 	return false, nil
 }
 
-// PutDerived creates derived content via simple-content HTTP API
+// PutDerived creates derived content via simple-content HTTP API using multipart upload
 func (dw *HTTPDerivedWriter) PutDerived(ctx context.Context, contentID string, derivedType string, derivedVersion int, r io.Reader, meta map[string]string) (string, error) {
 	// Create variant name from type and version
 	variant := fmt.Sprintf("%s_v%d", derivedType, derivedVersion)
@@ -40,33 +41,40 @@ func (dw *HTTPDerivedWriter) PutDerived(ctx context.Context, contentID string, d
 		fileName = fmt.Sprintf("derived_%s.dat", derivedType)
 	}
 
-	// Read content into buffer (required for HTTP upload)
+	// Read content into buffer
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return "", fmt.Errorf("failed to read content: %w", err)
 	}
 
-	// Create derived content request
-	reqBody := map[string]interface{}{
-		"parent_id":       contentID,
-		"derivation_type": derivedType,
-		"variant":         variant,
-		"file_name":       fileName,
-		"tags":            []string{derivedType, variant},
-		"content_data":    string(data), // TODO: Handle binary properly
-	}
+	// Create multipart form with file and metadata
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
 
-	jsonData, err := json.Marshal(reqBody)
+	// Add derivation metadata
+	writer.WriteField("derivation_type", derivedType)
+	writer.WriteField("variant", variant)
+
+	// Add file
+	part, err := writer.CreateFormFile("file", fileName)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return "", fmt.Errorf("failed to create form file: %w", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		return "", fmt.Errorf("failed to write file data: %w", err)
 	}
 
+	// Close the multipart writer
+	contentType := writer.FormDataContentType()
+	writer.Close()
+
+	// POST to derived content endpoint with multipart data
 	url := fmt.Sprintf("%s/api/v1/contents/%s/derived", dw.baseURL, contentID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonData))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 
 	resp, err := dw.httpClient.Do(req)
 	if err != nil {
@@ -80,14 +88,26 @@ func (dw *HTTPDerivedWriter) PutDerived(ctx context.Context, contentID string, d
 	}
 
 	// Parse response to get derived content ID
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	// Extract ID from response
 	derivedID, ok := result["id"].(string)
 	if !ok {
+		// Try nested in "data" field
+		if dataMap, dataOk := result["data"].(map[string]interface{}); dataOk {
+			derivedID, ok = dataMap["id"].(string)
+		}
+	}
+
+	if !ok || derivedID == "" {
 		return "", fmt.Errorf("no ID in response")
 	}
 
