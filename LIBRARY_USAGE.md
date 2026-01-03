@@ -28,10 +28,11 @@ import (
 func main() {
     // 1. Initialize DBOS runtime (required for durability)
     dbosRuntime, err := dbosruntime.NewRuntime(context.Background(), dbosruntime.Config{
-        DatabaseURL: "postgresql://user:pass@localhost:5432/mydb",
-        AppName:     "my-app",
-        QueueName:   "default",
-        Concurrency: 4,
+        DatabaseURL:        "postgresql://user:pass@localhost:5432/mydb",
+        AppName:            "my-app",
+        QueueName:          "default",
+        Concurrency:        4,
+        ApplicationVersion: "my-app-v1",  // Required for distributed workflows
     })
     if err != nil {
         log.Fatalf("Failed to initialize DBOS: %v", err)
@@ -360,9 +361,52 @@ func main() {
 DBOS_SYSTEM_DATABASE_URL=postgresql://user:pass@localhost:5432/mydb
 DBOS_QUEUE_NAME=default
 DBOS_QUEUE_CONCURRENCY=4
+DBOS_APPLICATION_VERSION=my-app-v1  # CRITICAL for distributed workflows
 
 # simple-content API (for distributed setup)
 CONTENT_API_URL=http://localhost:4000
+```
+
+### Application Version for Distributed Workflows
+
+**CRITICAL:** When running multiple components (client + worker), all must use the **same `ApplicationVersion`**:
+
+```go
+// Client component (enqueues workflows)
+dbosRuntime, _ := dbosruntime.NewRuntime(ctx, dbosruntime.Config{
+    DatabaseURL:        dbURL,
+    AppName:            "content-pipeline",
+    ApplicationVersion: "content-pipeline-v1",  // Must match
+    Concurrency:        0,  // Client mode
+})
+
+// Worker component (executes workflows)
+dbosRuntime, _ := dbosruntime.NewRuntime(ctx, dbosruntime.Config{
+    DatabaseURL:        dbURL,
+    AppName:            "content-pipeline",
+    ApplicationVersion: "content-pipeline-v1",  // Must match
+    Concurrency:        4,  // Worker mode
+})
+```
+
+**Why?**
+- DBOS generates a SHA-256 hash of each binary as the default `application_version`
+- Different binaries have different hashes, preventing workflow routing
+- Setting a shared custom version enables distributed workflow execution
+
+**Environment Variable:**
+```bash
+export DBOS_APPLICATION_VERSION=content-pipeline-v1
+```
+
+**Code:**
+```go
+appVersion := os.Getenv("DBOS_APPLICATION_VERSION")
+dbosRuntime, _ := dbosruntime.NewRuntime(ctx, dbosruntime.Config{
+    DatabaseURL:        dbURL,
+    AppName:            "content-pipeline",
+    ApplicationVersion: appVersion,  // Read from environment
+})
 ```
 
 ### Load from .env file

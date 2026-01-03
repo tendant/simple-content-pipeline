@@ -81,7 +81,97 @@ runID, _ := runner.RunAsync(ctx, pipeline.ProcessRequest{
 
 ---
 
-## 3. Trigger Model
+## 3. Distributed Architecture (Production Mode)
+
+### Overview
+
+In production, the pipeline runs as a **distributed system** with separate components sharing workflow execution via DBOS:
+
+```
+┌──────────────────┐     ┌─────────────────┐     ┌──────────────────┐
+│  Application     │────▶│   Go Worker     │     │  Python Worker   │
+│  (Client)        │     │  (Thumbnails)   │     │  (ML Workloads)  │
+│  simple-content  │     │     :8081       │     │     :8082        │
+└──────┬───────────┘     └────────┬────────┘     └────────┬─────────┘
+       │                          │                       │
+       └──────────────────────────┼───────────────────────┘
+                                  ↓
+                           ┌──────────────┐
+                           │     DBOS     │
+                           │  PostgreSQL  │
+                           │    :5432     │
+                           └──────────────┘
+```
+
+### Components
+
+1. **Application Server** (Client Mode)
+   - Uses simple-content for content management
+   - Enqueues workflows via DBOS queue
+   - Does not execute workflows (concurrency=0)
+   - Shares: `app_name=content-pipeline`, `application_version=<your-app-v1>`
+
+2. **Go Worker** (Executor Mode)
+   - Executes thumbnail generation workflows
+   - Polls DBOS queue for work
+   - Shares: `app_name=content-pipeline`, `application_version=<your-app-v1>`
+
+3. **Python Worker** (Executor Mode)
+   - Executes ML workflows (OCR, object detection)
+   - Polls DBOS queue for work
+   - Shares: `app_name=content-pipeline`, `application_version=<your-app-v1>`
+
+### Critical Requirement: Shared Application Version
+
+**All components MUST use the same `application_version`** to share workflows:
+
+**.env files for all components:**
+```bash
+DBOS_APPLICATION_VERSION=my-app-v1  # MUST match across all components
+DBOS_SYSTEM_DATABASE_URL=postgres://user:pwd@localhost:5432/mydb?sslmode=disable
+DBOS_QUEUE_NAME=default
+```
+
+**Why?** DBOS matches workflows to executors by `application_version`. Without a shared custom version, each binary gets a unique SHA-256 hash, preventing workflow routing.
+
+### Quick Start (Distributed Mode)
+
+**Terminal 1: Start Application (client mode)**
+```bash
+cd your-application
+export DBOS_APPLICATION_VERSION=my-app-v1
+./your-app
+# Enqueues workflows to DBOS queue
+```
+
+**Terminal 2: Start Go Worker (executor)**
+```bash
+cd simple-content-pipeline
+export DBOS_APPLICATION_VERSION=my-app-v1
+./pipeline-worker
+# Executes thumbnail workflows from queue
+```
+
+**Terminal 3: Start Python Worker (executor)**
+```bash
+cd simple-content-pipeline/python-worker
+export DBOS_APPLICATION_VERSION=my-app-v1
+python main.py
+# Executes ML workflows from queue
+```
+
+**Test:**
+```bash
+# Upload content via your application's API
+curl -X POST http://localhost:8080/api/v1/content \
+  -F "file=@test.jpg"
+
+# Application enqueues thumbnail workflows → Go worker executes them
+```
+
+---
+
+## 4. Trigger Model
 
 ### Trigger Endpoint (Worker)
 
@@ -396,11 +486,31 @@ type DerivedWriter interface {
 
 Environment variables:
 
-- `DATABASE_URL`
-- `PIPELINE_HTTP_ADDR=:8080`
-- `STORAGE_DRIVER=s3|fs`
-- `STORAGE_BUCKET=...`
-- `WORKER_CONCURRENCY=4`
+- `DBOS_SYSTEM_DATABASE_URL` - PostgreSQL connection for DBOS workflow state
+- `DBOS_QUEUE_NAME` - Queue name for workflow distribution (default: "default")
+- `DBOS_QUEUE_CONCURRENCY` - Number of concurrent workers (default: 4)
+- `DBOS_APPLICATION_VERSION` - **REQUIRED for distributed setup** - Shared version identifier
+- `CONTENT_API_URL` - simple-content HTTP API endpoint (e.g., http://localhost:8080)
+- `PIPELINE_HTTP_ADDR=:8081` - Worker HTTP address
+- `STORAGE_DRIVER=s3|fs` - Storage backend
+- `STORAGE_BUCKET=...` - Storage bucket/path
+
+### Critical: Application Version for Distributed Workflows
+
+When running multiple components (PAS client + Go worker + Python worker), **all must use the same `DBOS_APPLICATION_VERSION`**:
+
+```bash
+# All components must have matching versions
+export DBOS_APPLICATION_VERSION=content-pipeline-v1
+```
+
+**Why?** DBOS uses `application_version` for workflow compatibility. By default, it generates a SHA-256 hash of each binary, causing version mismatches. Setting a shared custom version allows:
+- PAS server (client mode) to enqueue workflows
+- Go worker to execute thumbnail workflows
+- Python worker to execute ML workflows
+- All sharing the same DBOS queue and workflow state
+
+**Without matching versions**, you'll see "workflow not found" errors when workers try to execute workflows enqueued by other components.
 
 ---
 

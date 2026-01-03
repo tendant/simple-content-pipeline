@@ -36,9 +36,28 @@ cp .env.example .env
 
 Key settings:
 - `DBOS_SYSTEM_DATABASE_URL`: PostgreSQL connection (same as Go worker)
-- `CONTENT_API_URL`: PAS API endpoint (default: http://localhost:8080)
+- `DBOS_APPLICATION_VERSION`: **REQUIRED** - Must match all other components (e.g., `my-app-v1`)
+- `DBOS_QUEUE_NAME`: Queue name (default: `default`)
+- `CONTENT_API_URL`: simple-content API endpoint (default: http://localhost:8080)
 - `WORKER_HTTP_ADDR`: Python worker HTTP port (default: :8082)
 - `YOLO_MODEL`: Model variant (yolov8n/yolov8m/yolov8l)
+
+### Critical: Application Version
+
+**All components (Application + Go worker + Python worker) MUST use the same `DBOS_APPLICATION_VERSION`:**
+
+```bash
+# .env file for Python worker
+DBOS_APPLICATION_VERSION=my-app-v1  # MUST match your application and Go worker
+
+# Same value in your-application/.env
+DBOS_APPLICATION_VERSION=my-app-v1
+
+# Same value in simple-content-pipeline/.env
+DBOS_APPLICATION_VERSION=my-app-v1
+```
+
+**Why?** DBOS routes workflows based on `application_version`. Without a shared custom version, each binary gets a unique hash, preventing the Python worker from receiving ML workflows enqueued by your application.
 
 ## Running
 
@@ -88,11 +107,11 @@ Detects objects in images using YOLOv8.
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Go Worker      │     │  Python Worker   │     │    PAS      │
-│  (Thumbnails)   │────▶│  (ML Workloads)  │────▶│    API      │
-│  :8081          │     │  :8082           │     │   :8080     │
-└────────┬────────┘     └────────┬─────────┘     └──────────────┘
+┌─────────────────┐     ┌──────────────────┐     ┌──────────────────┐
+│  Go Worker      │     │  Python Worker   │     │  Application     │
+│  (Thumbnails)   │────▶│  (ML Workloads)  │────▶│  simple-content  │
+│  :8081          │     │  :8082           │     │     :8080        │
+└────────┬────────┘     └────────┬─────────┘     └──────────────────┘
          │                       │
          └───────────┬───────────┘
                      ↓
