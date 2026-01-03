@@ -26,16 +26,21 @@ logger = logging.getLogger(__name__)
 dbos_db_url = os.getenv('DBOS_SYSTEM_DATABASE_URL',
                         'postgres://pas:pwd@localhost:5432/pas?sslmode=disable')
 queue_name = os.getenv('DBOS_QUEUE_NAME', 'default')
+app_version = os.getenv('DBOS_APPLICATION_VERSION', '')
 
 logger.info("Initializing Python ML Worker")
 logger.info(f"  Database: {dbos_db_url.split('@')[1]}")  # Hide password
 logger.info(f"  Queue: {queue_name}")
+if app_version:
+    logger.info(f"  Application Version: {app_version}")
 
 # Initialize DBOS (pure library mode, no HTTP server)
+# Use shared app name and application version to be part of same DBOS application
 DBOS(
     config={
-        'name': 'python_ml_worker',
+        'name': 'content-pipeline',  # Shared with PAS and Go worker
         'system_database_url': dbos_db_url,
+        'application_version': app_version if app_version else None,
     }
 )
 

@@ -13,11 +13,12 @@ import (
 
 // Config holds the configuration for initializing the pipeline runner
 type Config struct {
-	DatabaseURL    string // DBOS PostgreSQL connection string
-	AppName        string // Application name for DBOS
-	QueueName      string // DBOS queue name
-	Concurrency    int    // Number of concurrent workers
-	ContentAPIURL  string // URL of the content API server
+	DatabaseURL        string // DBOS PostgreSQL connection string
+	AppName            string // Application name for DBOS
+	QueueName          string // DBOS queue name
+	Concurrency        int    // Number of concurrent workers
+	ContentAPIURL      string // URL of the content API server
+	ApplicationVersion string // Optional: Override binary hash for version matching
 }
 
 // Runner provides a high-level API for running pipeline workflows via DBOS
@@ -30,10 +31,11 @@ type Runner struct {
 func New(cfg Config) (*Runner, error) {
 	// Create DBOS runtime
 	dbosRuntime, err := dbosruntime.NewRuntime(context.Background(), dbosruntime.Config{
-		DatabaseURL: cfg.DatabaseURL,
-		AppName:     cfg.AppName,
-		QueueName:   cfg.QueueName,
-		Concurrency: cfg.Concurrency,
+		DatabaseURL:        cfg.DatabaseURL,
+		AppName:            cfg.AppName,
+		QueueName:          cfg.QueueName,
+		Concurrency:        cfg.Concurrency,
+		ApplicationVersion: cfg.ApplicationVersion,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize DBOS: %w", err)

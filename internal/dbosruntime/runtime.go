@@ -28,8 +28,9 @@ func NewRuntime(ctx context.Context, cfg Config) (*Runtime, error) {
 
 	// Initialize DBOS context
 	dbosCtx, err := dbos.NewDBOSContext(ctx, dbos.Config{
-		DatabaseURL: cfg.DatabaseURL,
-		AppName:     cfg.AppName,
+		DatabaseURL:        cfg.DatabaseURL,
+		AppName:            cfg.AppName,
+		ApplicationVersion: cfg.ApplicationVersion,
 	})
 	if err != nil {
 		return nil, err

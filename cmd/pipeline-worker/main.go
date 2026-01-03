@@ -74,11 +74,14 @@ func main() {
 		queueName = "default"
 	}
 
+	appVersion := os.Getenv("DBOS_APPLICATION_VERSION")
+
 	dbosRuntime, err := dbosruntime.NewRuntime(context.Background(), dbosruntime.Config{
-		DatabaseURL: dbURL,
-		AppName:     "pipeline-worker",
-		QueueName:   queueName,
-		Concurrency: 4, // TODO: read from env
+		DatabaseURL:        dbURL,
+		AppName:            "content-pipeline", // Shared with PAS and Python worker
+		QueueName:          queueName,
+		Concurrency:        4, // TODO: read from env
+		ApplicationVersion: appVersion,
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize DBOS: %v", err)

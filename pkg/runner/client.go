@@ -22,10 +22,11 @@ type Client struct {
 func NewClient(cfg Config) (*Client, error) {
 	// Create DBOS runtime
 	dbosRuntime, err := dbosruntime.NewRuntime(context.Background(), dbosruntime.Config{
-		DatabaseURL: cfg.DatabaseURL,
-		AppName:     cfg.AppName,
-		QueueName:   cfg.QueueName,
-		Concurrency: 0, // Client mode: don't process workflows
+		DatabaseURL:        cfg.DatabaseURL,
+		AppName:            cfg.AppName,
+		QueueName:          cfg.QueueName,
+		Concurrency:        0, // Client mode: don't process workflows
+		ApplicationVersion: cfg.ApplicationVersion,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize DBOS: %w", err)

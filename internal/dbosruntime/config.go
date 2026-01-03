@@ -17,6 +17,10 @@ type Config struct {
 	// Concurrency is the number of concurrent workers per queue
 	// Optional. Defaults to 4
 	Concurrency int
+
+	// ApplicationVersion overrides the default binary hash for version matching
+	// Optional. Allows multiple binaries to share workflows
+	ApplicationVersion string
 }
 
 // WithDefaults fills in default values for optional fields
