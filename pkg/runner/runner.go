@@ -78,15 +78,17 @@ func (r *Runner) RunThumbnail(ctx context.Context, contentID string, width, heig
 	})
 }
 
-// RunObjectDetection triggers an object detection workflow (handled by Python worker)
+// RunObjectDetection triggers an object detection workflow
 func (r *Runner) RunObjectDetection(ctx context.Context, contentID string) (string, error) {
-	return r.runner.RunAsync(ctx, pipeline.ProcessRequest{
-		ContentID: contentID,
-		Job:       "object_detection",
-		Versions: map[string]int{
-			"object_detection": 1,
-		},
-	})
+	// Start workflow by name (language-agnostic)
+	fmt.Println("DEBUG: Using StartWorkflowByName for detect_objects_workflow")
+	return r.runtime.StartWorkflowByName(ctx, "detect_objects_workflow", contentID, nil)
+}
+
+// RunOCR triggers an OCR workflow
+func (r *Runner) RunOCR(ctx context.Context, contentID string) (string, error) {
+	// Start workflow by name (language-agnostic)
+	return r.runtime.StartWorkflowByName(ctx, "ocr_workflow", contentID, nil)
 }
 
 // Shutdown gracefully shuts down the pipeline runner

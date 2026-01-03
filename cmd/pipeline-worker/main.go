@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,17 +10,21 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	simpleworkflow "github.com/tendant/simple-workflow"
 	"github.com/tendant/simple-content-pipeline/internal/dbosruntime"
+	"github.com/tendant/simple-content-pipeline/internal/executors"
 	"github.com/tendant/simple-content-pipeline/internal/handlers"
 	"github.com/tendant/simple-content-pipeline/internal/storage"
 	"github.com/tendant/simple-content-pipeline/internal/workflows"
 	"github.com/tendant/simple-content-pipeline/pkg/pipeline"
 	"github.com/tendant/simple-content/pkg/simplecontent/presets"
+	_ "github.com/lib/pq"
 )
 
 func main() {
@@ -108,6 +113,46 @@ func main() {
 	log.Printf("  Database: %s", dbURL)
 	log.Printf("  Queue: %s", dbosRuntime.QueueName())
 	log.Printf("  Concurrency: %d", dbosRuntime.Concurrency())
+
+	// Initialize simple-workflow intent poller
+	workflowDBURL := os.Getenv("WORKFLOW_DATABASE_URL")
+	if workflowDBURL == "" {
+		log.Printf("⚠ WORKFLOW_DATABASE_URL not set, intent poller disabled (using HTTP fallback)")
+	} else {
+		// Add search_path=workflow to connection string
+		if strings.Contains(workflowDBURL, "?") {
+			workflowDBURL += "&search_path=workflow"
+		} else {
+			workflowDBURL += "?search_path=workflow"
+		}
+
+		workflowDB, err := sql.Open("postgres", workflowDBURL)
+		if err != nil {
+			log.Fatalf("Failed to connect to workflow database: %v", err)
+		}
+		defer workflowDB.Close()
+
+		// Test connection
+		if err := workflowDB.Ping(); err != nil {
+			log.Fatalf("Failed to ping workflow database: %v", err)
+		}
+
+		// Create intent poller
+		supportedWorkflows := []string{"content.thumbnail.v1"}
+		poller := simpleworkflow.NewPoller(workflowDB, supportedWorkflows)
+		poller.SetWorkerID("pipeline-worker-go")
+
+		// Create and register thumbnail executor
+		thumbnailExecutor := executors.NewThumbnailExecutor(contentReader, derivedWriter)
+		poller.RegisterExecutor("content.thumbnail.v1", thumbnailExecutor)
+
+		// Start poller in background
+		go poller.Start(context.Background())
+
+		log.Printf("✓ Simple-workflow intent poller started")
+		log.Printf("  Supported workflows: %v", supportedWorkflows)
+		log.Printf("  Worker ID: pipeline-worker-go")
+	}
 
 	// Create HTTP server
 	mux := http.NewServeMux()

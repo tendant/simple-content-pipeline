@@ -18,3 +18,8 @@ aiohttp>=3.9.0
 
 # Utilities
 python-dotenv>=1.0.0
+psycopg2-binary>=2.9.0  # PostgreSQL driver for intent polling
+
+# Simple-workflow library
+# Note: Loaded from ../simple-workflow/python via sys.path in main.py
+# Requires: psycopg2-binary (listed above)

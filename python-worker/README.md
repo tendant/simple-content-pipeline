@@ -1,12 +1,13 @@
 # Python ML Worker
 
-Python worker for ML-based content processing workflows (OCR, object detection) using DBOS.
+Python worker for ML-based content processing workflows (OCR, object detection) using DBOS and simple-workflow.
 
 ## Features
 
 - **Object Detection**: YOLOv8-based object detection in images
 - **OCR**: PaddleOCR text extraction (coming soon)
 - **DBOS Integration**: Durable workflow execution with PostgreSQL
+- **Simple-workflow**: Intent-based workflow polling from workflow_intent table
 - **Simple-content API**: Seamless integration with content storage
 
 ## Prerequisites
@@ -38,9 +39,27 @@ Key settings:
 - `DBOS_SYSTEM_DATABASE_URL`: PostgreSQL connection (same as Go worker)
 - `DBOS_APPLICATION_VERSION`: **REQUIRED** - Must match all other components (e.g., `my-app-v1`)
 - `DBOS_QUEUE_NAME`: Queue name (default: `default`)
+- `WORKFLOW_DATABASE_URL`: PostgreSQL URL for simple-workflow intent polling (optional)
 - `CONTENT_API_URL`: simple-content API endpoint (default: http://localhost:8080)
 - `WORKER_HTTP_ADDR`: Python worker HTTP port (default: :8082)
 - `YOLO_MODEL`: Model variant (yolov8n/yolov8m/yolov8l)
+
+### Simple-Workflow Integration (Optional)
+
+If `WORKFLOW_DATABASE_URL` is set, the worker will also poll the `workflow_intent` table for ML workflows:
+
+```bash
+# Enable simple-workflow intent polling
+WORKFLOW_DATABASE_URL=postgres://user:pass@localhost:5432/dbname
+
+# Worker will poll for these workflows:
+# - content.ocr.v1
+# - content.object_detection.v1
+```
+
+This enables the worker to process workflows from both:
+1. **DBOS queue** - Direct workflow invocations
+2. **workflow_intent table** - Intent-based workflows from simple-workflow
 
 ### Critical: Application Version
 

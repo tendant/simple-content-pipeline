@@ -63,13 +63,8 @@ func (c *Client) RunThumbnail(ctx context.Context, contentID string, width, heig
 
 // RunObjectDetection enqueues an object detection workflow for workers to execute
 func (c *Client) RunObjectDetection(ctx context.Context, contentID string) (string, error) {
-	return c.runner.RunAsync(ctx, pipeline.ProcessRequest{
-		ContentID: contentID,
-		Job:       "object_detection",
-		Versions: map[string]int{
-			"object_detection": 1,
-		},
-	})
+	// Start workflow by name (language-agnostic)
+	return c.runtime.StartWorkflowByName(ctx, "detect_objects_workflow", contentID, nil)
 }
 
 // Shutdown gracefully shuts down the client

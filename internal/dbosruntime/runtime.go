@@ -2,10 +2,12 @@ package dbosruntime
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	_ "github.com/lib/pq"
 )
 
 // Runtime manages the DBOS runtime lifecycle
@@ -13,6 +15,7 @@ type Runtime struct {
 	dbosContext dbos.DBOSContext
 	queue       *dbos.WorkflowQueue
 	config      Config
+	db          *sql.DB
 }
 
 // NewRuntime creates a new DBOS runtime instance
@@ -39,10 +42,17 @@ func NewRuntime(ctx context.Context, cfg Config) (*Runtime, error) {
 	// Create workflow queue
 	queue := dbos.NewWorkflowQueue(dbosCtx, cfg.QueueName)
 
+	// Create database connection for direct SQL operations
+	db, err := sql.Open("postgres", cfg.DatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Runtime{
 		dbosContext: dbosCtx,
 		queue:       &queue,
 		config:      cfg,
+		db:          db,
 	}, nil
 }
 
@@ -54,6 +64,9 @@ func (r *Runtime) Launch() error {
 // Shutdown gracefully shuts down the DBOS runtime
 func (r *Runtime) Shutdown(timeout time.Duration) error {
 	dbos.Shutdown(r.dbosContext, timeout)
+	if r.db != nil {
+		r.db.Close()
+	}
 	return nil
 }
 
