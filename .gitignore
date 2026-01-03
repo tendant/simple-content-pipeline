@@ -49,3 +49,6 @@ Thumbs.db
 *.db
 *.sqlite
 
+
+__pycache__/
+*.log
