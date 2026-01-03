@@ -84,7 +84,7 @@ def detect_objects_workflow(content_id: str, metadata: Dict[str, Any] = None) ->
         Dictionary with detection results
     """
     metadata = metadata or {}
-    run_id = DBOS.workflow_id()
+    run_id = DBOS.workflow_id
 
     logger.info(f"[{run_id}] Starting object detection workflow for content_id={content_id}")
 
