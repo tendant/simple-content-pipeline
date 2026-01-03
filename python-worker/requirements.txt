@@ -1,0 +1,18 @@
+# DBOS Python SDK
+dbos>=0.9.0
+
+# Object Detection
+ultralytics>=8.0.0  # YOLOv8
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# OCR (for future implementation)
+# paddleocr>=2.7.0
+# paddlepaddle>=2.5.0
+
+# HTTP client
+requests>=2.31.0
+aiohttp>=3.9.0
+
+# Utilities
+python-dotenv>=1.0.0

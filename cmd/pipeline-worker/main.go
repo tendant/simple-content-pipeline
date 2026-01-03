@@ -92,6 +92,9 @@ func main() {
 	workflowRunner.Register(pipeline.JobThumbnail, thumbnailWorkflow)
 	log.Printf("✓ Registered workflow: %s for job: %s", thumbnailWorkflow.Name(), pipeline.JobThumbnail)
 
+	// Note: OCR and object detection are handled by the Python ML worker
+	// See python-worker/ directory for ML-based workflows
+
 	// Launch DBOS (must be done after workflow registration)
 	if err := dbosRuntime.Launch(); err != nil {
 		log.Fatalf("Failed to launch DBOS: %v", err)
