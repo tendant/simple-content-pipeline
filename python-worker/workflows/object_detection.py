@@ -1,5 +1,5 @@
 """
-Object Detection Workflow using YOLOv8
+Object Detection Workflow using YOLO11
 """
 
 import io
@@ -24,10 +24,10 @@ def get_yolo_model():
     """Get or initialize YOLO model (singleton pattern)"""
     global _yolo_model
     if _yolo_model is None:
-        logger.info("Loading YOLOv8 model...")
-        # Use YOLOv8n (nano) for speed, can switch to yolov8m/yolov8l for accuracy
-        _yolo_model = YOLO('yolov8n.pt')
-        logger.info("✓ YOLOv8 model loaded")
+        logger.info("Loading YOLO11 model...")
+        # Use YOLO11n (nano) for speed, can switch to yolo11m/yolo11l for accuracy
+        _yolo_model = YOLO('yolo11n.pt')
+        logger.info("✓ YOLO11 model loaded")
     return _yolo_model
 
 
@@ -137,7 +137,7 @@ def detect_objects_workflow(content_id: str, metadata: Dict[str, Any] = None) ->
             'objects': detections,
             'total_objects': len(detections),
             'processing_time_ms': processing_time_ms,
-            'model': 'yolov8n',
+            'model': 'yolo11n',
             'image_size': {
                 'width': image.size[0],
                 'height': image.size[1]
