@@ -52,3 +52,5 @@ Thumbs.db
 
 __pycache__/
 *.log
+
+*.pt
