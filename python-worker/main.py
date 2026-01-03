@@ -97,11 +97,7 @@ if workflow_db_url:
     intent_poller.register_executor('content.ocr.v1', ml_executor)
     intent_poller.register_executor('content.object_detection.v1', ml_executor)
 
-    # Start poller in background thread
-    poller_thread = threading.Thread(target=intent_poller.start, daemon=True)
-    poller_thread.start()
-
-    logger.info("✓ Simple-workflow intent poller started")
+    logger.info("✓ Simple-workflow intent poller configured")
     logger.info(f"  Supported workflows: {supported_workflows}")
     logger.info(f"  Worker ID: python-ml-worker")
 else:
@@ -109,9 +105,24 @@ else:
 
 if __name__ == '__main__':
     try:
-        # Start DBOS worker (queue-based, no HTTP server)
+        # Start DBOS worker in background thread
         logger.info("Starting DBOS worker...")
-        DBOS.launch()
+        dbos_thread = threading.Thread(target=DBOS.launch, daemon=True)
+        dbos_thread.start()
+
+        # Wait for DBOS to initialize
+        import time
+        time.sleep(3)
+
+        # Now start intent poller after DBOS is ready
+        if intent_poller:
+            poller_thread = threading.Thread(target=intent_poller.start, daemon=True)
+            poller_thread.start()
+            logger.info("✓ Simple-workflow intent poller started")
+
+        # Keep main thread alive
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         logger.info("Shutting down Python ML worker...")
         sys.exit(0)
