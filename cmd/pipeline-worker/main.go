@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	simpleworkflow "github.com/tendant/simple-workflow"
 	"github.com/tendant/simple-content-pipeline/internal/dbosruntime"
 	"github.com/tendant/simple-content-pipeline/internal/executors"
@@ -142,6 +143,11 @@ func main() {
 		poller := simpleworkflow.NewPoller(workflowDB, supportedWorkflows)
 		poller.SetWorkerID("pipeline-worker-go")
 
+		// Initialize Prometheus metrics
+		metrics := simpleworkflow.NewPrometheusMetrics(nil) // nil = use default registry
+		poller.SetMetrics(metrics)
+		log.Printf("✓ Prometheus metrics enabled")
+
 		// Create and register thumbnail executor
 		thumbnailExecutor := executors.NewThumbnailExecutor(contentReader, derivedWriter)
 		poller.RegisterExecutor("content.thumbnail.v1", thumbnailExecutor)
@@ -162,10 +168,12 @@ func main() {
 
 	// Register handlers
 	mux.HandleFunc("/health", handleHealth)
+	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/v1/process", asyncHandler.HandleProcessAsync)
 	mux.HandleFunc("/v1/runs/", asyncHandler.HandleStatus)
 
 	log.Printf("✓ Registered async endpoints")
+	log.Printf("✓ Metrics endpoint: http://%s/metrics", httpAddr)
 
 	server := &http.Server{
 		Addr:    httpAddr,

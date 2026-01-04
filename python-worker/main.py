@@ -9,6 +9,9 @@ import sys
 import logging
 import threading
 from dotenv import load_dotenv
+from fastapi import FastAPI, Response
+from prometheus_client import generate_latest, REGISTRY
+import uvicorn
 
 from dbos import DBOS
 from workflows.object_detection import detect_objects_workflow
@@ -24,6 +27,7 @@ if os.path.exists(simple_workflow_path):
     sys.path.insert(0, simple_workflow_path)
 
 from simpleworkflow import IntentPoller
+from simpleworkflow.metrics import PrometheusMetrics
 from executors import MLWorkflowExecutor
 
 # Load environment variables
@@ -84,13 +88,18 @@ if workflow_db_url:
     # Create ML executor
     ml_executor = MLWorkflowExecutor()
 
+    # Initialize Prometheus metrics
+    metrics = PrometheusMetrics()
+    logger.info("✓ Prometheus metrics enabled")
+
     # Configure poller
     supported_workflows = ['content.ocr.v1', 'content.object_detection.v1']
     intent_poller = IntentPoller(
         db_url=workflow_db_url,
         supported_workflows=supported_workflows,
         worker_id='python-ml-worker',
-        poll_interval=2
+        poll_interval=2,
+        metrics=metrics
     )
 
     # Register executor for both workflows
@@ -103,8 +112,33 @@ if workflow_db_url:
 else:
     logger.warning("⚠ WORKFLOW_DATABASE_URL not set, intent poller disabled (using DBOS queue fallback)")
 
+# Create FastAPI app for /metrics and /health endpoints
+app = FastAPI(title="Python ML Worker", version="1.0.0")
+
+@app.get('/health')
+async def health():
+    return {'status': 'healthy', 'worker_id': 'python-ml-worker'}
+
+@app.get('/metrics')
+async def metrics_endpoint():
+    return Response(content=generate_latest(REGISTRY), media_type='text/plain')
+
 if __name__ == '__main__':
     try:
+        # Get HTTP port from environment
+        worker_http_addr = os.getenv('WORKER_HTTP_ADDR', ':8082')
+        metrics_port = int(worker_http_addr.split(':')[-1])
+
+        # Start FastAPI metrics server in background thread using uvicorn
+        metrics_thread = threading.Thread(
+            target=lambda: uvicorn.run(app, host='0.0.0.0', port=metrics_port, log_level='warning'),
+            daemon=True
+        )
+        metrics_thread.start()
+        logger.info(f"✓ Metrics server started on :{metrics_port}")
+        logger.info(f"  Health endpoint: http://localhost:{metrics_port}/health")
+        logger.info(f"  Metrics endpoint: http://localhost:{metrics_port}/metrics")
+
         # Start DBOS worker in background thread
         logger.info("Starting DBOS worker...")
         dbos_thread = threading.Thread(target=DBOS.launch, daemon=True)
