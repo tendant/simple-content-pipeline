@@ -144,10 +144,47 @@ func (r *WorkflowRunner) GetStatus(ctx context.Context, runID string) (*Workflow
 		return nil, errors.New("status tracking requires DBOS runtime")
 	}
 
-	// TODO: Implement actual DBOS status retrieval
-	// This depends on DBOS SDK's workflow handle API
+	// Query DBOS workflow_status table
+	statusInfo, err := r.dbosRuntime.GetWorkflowStatus(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workflow status: %w", err)
+	}
+
+	// Convert DBOS status to our status format
+	state := mapDBOSStatus(statusInfo.Status)
+
+	// Convert timestamps
+	startedAt := time.UnixMilli(statusInfo.CreatedAt)
+	var finishedAt *time.Time
+
+	// If workflow is in a terminal state, set finished time
+	if state == "succeeded" || state == "failed" {
+		updatedAt := time.UnixMilli(statusInfo.UpdatedAt)
+		finishedAt = &updatedAt
+	}
+
 	return &WorkflowStatus{
-		RunID: runID,
-		State: "running",
+		RunID:      runID,
+		State:      state,
+		StartedAt:  startedAt,
+		FinishedAt: finishedAt,
 	}, nil
+}
+
+// mapDBOSStatus maps DBOS status values to our status format
+func mapDBOSStatus(dbosStatus string) string {
+	switch dbosStatus {
+	case "PENDING":
+		return "pending"
+	case "ENQUEUED":
+		return "pending"
+	case "SUCCESS":
+		return "succeeded"
+	case "ERROR":
+		return "failed"
+	case "RETRIES_EXCEEDED":
+		return "failed"
+	default:
+		return "running"
+	}
 }

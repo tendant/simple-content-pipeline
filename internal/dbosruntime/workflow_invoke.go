@@ -88,3 +88,36 @@ func (r *Runtime) StartWorkflowByName(ctx context.Context, workflowName string, 
 
 	return workflowUUID, nil
 }
+
+// WorkflowStatusInfo represents the status of a workflow
+type WorkflowStatusInfo struct {
+	WorkflowUUID string
+	Status       string
+	Name         string
+	CreatedAt    int64
+	UpdatedAt    int64
+}
+
+// GetWorkflowStatus retrieves the status of a workflow from the DBOS status table
+func (r *Runtime) GetWorkflowStatus(ctx context.Context, workflowUUID string) (*WorkflowStatusInfo, error) {
+	query := `
+		SELECT workflow_uuid, status, name, created_at, updated_at
+		FROM dbos.workflow_status
+		WHERE workflow_uuid = $1
+	`
+
+	var info WorkflowStatusInfo
+	err := r.db.QueryRowContext(ctx, query, workflowUUID).Scan(
+		&info.WorkflowUUID,
+		&info.Status,
+		&info.Name,
+		&info.CreatedAt,
+		&info.UpdatedAt,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to query workflow status: %w", err)
+	}
+
+	return &info, nil
+}

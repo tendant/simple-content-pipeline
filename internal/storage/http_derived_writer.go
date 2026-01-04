@@ -26,8 +26,53 @@ func NewHTTPDerivedWriter(baseURL string) *HTTPDerivedWriter {
 
 // HasDerived checks if a derived output already exists for the given type/version
 func (dw *HTTPDerivedWriter) HasDerived(ctx context.Context, contentID string, derivedType string, derivedVersion int) (bool, error) {
-	// TODO: Query derived content via HTTP API
-	// For now, always return false (regenerate)
+	// Construct the variant we're looking for
+	variant := fmt.Sprintf("%s_v%d", derivedType, derivedVersion)
+
+	// Query derived content from simple-content API
+	url := fmt.Sprintf("%s/api/v1/contents/%s/derived", dw.baseURL, contentID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := dw.httpClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("failed to query derived content: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		// No derived content exists
+		return false, nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return false, fmt.Errorf("query derived failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var derivedList []struct {
+		Variant string `json:"variant"`
+		Status  string `json:"status"`
+	}
+	if err := json.Unmarshal(bodyBytes, &derivedList); err != nil {
+		return false, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Check if any derived content matches our variant and is ready
+	for _, derived := range derivedList {
+		if derived.Variant == variant && (derived.Status == "uploaded" || derived.Status == "processed") {
+			return true, nil
+		}
+	}
+
 	return false, nil
 }
 

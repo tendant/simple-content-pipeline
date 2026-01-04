@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	simpleworkflow "github.com/tendant/simple-workflow"
 	"github.com/tendant/simple-content-pipeline/internal/dbosruntime"
+	"github.com/tendant/simple-content-pipeline/internal/dedupe"
 	"github.com/tendant/simple-content-pipeline/internal/executors"
 	"github.com/tendant/simple-content-pipeline/internal/handlers"
 	"github.com/tendant/simple-content-pipeline/internal/storage"
@@ -82,11 +84,21 @@ func main() {
 
 	appVersion := os.Getenv("DBOS_APPLICATION_VERSION")
 
+	// Read concurrency from environment or use default
+	concurrency := 4
+	if concurrencyStr := os.Getenv("DBOS_QUEUE_CONCURRENCY"); concurrencyStr != "" {
+		if parsed, err := strconv.Atoi(concurrencyStr); err == nil && parsed > 0 {
+			concurrency = parsed
+		} else {
+			log.Printf("Warning: Invalid DBOS_QUEUE_CONCURRENCY value '%s', using default: %d", concurrencyStr, concurrency)
+		}
+	}
+
 	dbosRuntime, err := dbosruntime.NewRuntime(context.Background(), dbosruntime.Config{
 		DatabaseURL:        dbURL,
 		AppName:            "content-pipeline", // Shared with PAS and Python worker
 		QueueName:          queueName,
-		Concurrency:        4, // TODO: read from env
+		Concurrency:        concurrency,
 		ApplicationVersion: appVersion,
 	})
 	if err != nil {
@@ -160,11 +172,24 @@ func main() {
 		log.Printf("  Worker ID: pipeline-worker-go")
 	}
 
+	// Initialize dedupe tracker
+	dedupeDB, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Failed to open database for dedupe tracker: %v", err)
+	}
+	defer dedupeDB.Close()
+
+	dedupeTracker, err := dedupe.NewTracker(dedupeDB)
+	if err != nil {
+		log.Fatalf("Failed to initialize dedupe tracker: %v", err)
+	}
+	log.Printf("✓ Dedupe tracking enabled")
+
 	// Create HTTP server
 	mux := http.NewServeMux()
 
 	// Create async handler (DBOS-only)
-	asyncHandler := handlers.NewAsyncHandler(workflowRunner)
+	asyncHandler := handlers.NewAsyncHandler(workflowRunner, dedupeTracker)
 
 	// Register handlers
 	mux.HandleFunc("/health", handleHealth)

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/tendant/simple-content-pipeline/internal/dedupe"
 	"github.com/tendant/simple-content-pipeline/internal/workflows"
 	"github.com/tendant/simple-content-pipeline/pkg/pipeline"
 )
@@ -13,12 +14,14 @@ import (
 // AsyncHandler handles asynchronous workflow requests
 type AsyncHandler struct {
 	workflowRunner *workflows.WorkflowRunner
+	dedupeTracker  *dedupe.Tracker
 }
 
 // NewAsyncHandler creates a new async handler
-func NewAsyncHandler(runner *workflows.WorkflowRunner) *AsyncHandler {
+func NewAsyncHandler(runner *workflows.WorkflowRunner, tracker *dedupe.Tracker) *AsyncHandler {
 	return &AsyncHandler{
 		workflowRunner: runner,
+		dedupeTracker:  tracker,
 	}
 }
 
@@ -48,6 +51,20 @@ func (h *AsyncHandler) HandleProcessAsync(w http.ResponseWriter, r *http.Request
 
 	log.Printf("Enqueueing workflow: content_id=%s, job=%s", req.ContentID, req.Job)
 
+	// Record dedupe submission (track how many times this content has been submitted)
+	seenCount := 0
+	if h.dedupeTracker != nil {
+		count, err := h.dedupeTracker.Record(r.Context(), req.ContentID, req.Job, 1)
+		if err != nil {
+			log.Printf("Warning: Failed to record dedupe: %v (continuing anyway)", err)
+		} else {
+			seenCount = count
+			if seenCount > 1 {
+				log.Printf("Duplicate submission detected: content_id=%s, seen_count=%d", req.ContentID, seenCount)
+			}
+		}
+	}
+
 	// Enqueue workflow (non-blocking)
 	runID, err := h.workflowRunner.RunAsync(r.Context(), req)
 	if err != nil {
@@ -56,12 +73,12 @@ func (h *AsyncHandler) HandleProcessAsync(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	log.Printf("Workflow enqueued successfully: run_id=%s", runID)
+	log.Printf("Workflow enqueued successfully: run_id=%s, seen_count=%d", runID, seenCount)
 
 	// Return immediately with 202 Accepted
 	resp := pipeline.ProcessResponse{
 		RunID:           runID,
-		DedupeSeenCount: 0, // TODO: implement dedupe ledger in M2
+		DedupeSeenCount: seenCount,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -18,10 +20,12 @@ import (
 	"github.com/tendant/simple-content/pkg/simplecontent"
 	"github.com/tendant/simple-content/pkg/simplecontent/presets"
 	"github.com/tendant/simple-content-pipeline/internal/dbosruntime"
+	"github.com/tendant/simple-content-pipeline/internal/dedupe"
 	"github.com/tendant/simple-content-pipeline/internal/handlers"
 	"github.com/tendant/simple-content-pipeline/internal/storage"
 	"github.com/tendant/simple-content-pipeline/internal/workflows"
 	"github.com/tendant/simple-content-pipeline/pkg/pipeline"
+	_ "github.com/lib/pq"
 )
 
 // Standalone pipeline worker for quick testing
@@ -84,11 +88,21 @@ func main() {
 		queueName = "default"
 	}
 
+	// Read concurrency from environment or use default
+	concurrency := 4
+	if concurrencyStr := os.Getenv("DBOS_QUEUE_CONCURRENCY"); concurrencyStr != "" {
+		if parsed, err := strconv.Atoi(concurrencyStr); err == nil && parsed > 0 {
+			concurrency = parsed
+		} else {
+			log.Printf("Warning: Invalid DBOS_QUEUE_CONCURRENCY value '%s', using default: %d", concurrencyStr, concurrency)
+		}
+	}
+
 	dbosRuntime, err := dbosruntime.NewRuntime(context.Background(), dbosruntime.Config{
 		DatabaseURL: dbURL,
 		AppName:     "pipeline-standalone",
 		QueueName:   queueName,
-		Concurrency: 4, // TODO: read from env
+		Concurrency: concurrency,
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize DBOS: %v", err)
@@ -117,6 +131,19 @@ func main() {
 	log.Printf("  Queue: %s", dbosRuntime.QueueName())
 	log.Printf("  Concurrency: %d", dbosRuntime.Concurrency())
 
+	// Initialize dedupe tracker
+	dedupeDB, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Failed to open database for dedupe tracker: %v", err)
+	}
+	defer dedupeDB.Close()
+
+	dedupeTracker, err := dedupe.NewTracker(dedupeDB)
+	if err != nil {
+		log.Fatalf("Failed to initialize dedupe tracker: %v", err)
+	}
+	log.Printf("✓ Dedupe tracking enabled")
+
 	// Create HTTP server
 	mux := http.NewServeMux()
 
@@ -127,7 +154,7 @@ func main() {
 	}
 
 	// Create async handler (DBOS-only)
-	asyncHandler := handlers.NewAsyncHandler(workflowRunner)
+	asyncHandler := handlers.NewAsyncHandler(workflowRunner, dedupeTracker)
 
 	// Register handlers
 	mux.HandleFunc("/health", handleHealth)
