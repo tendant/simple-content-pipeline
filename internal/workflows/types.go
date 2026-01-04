@@ -138,36 +138,48 @@ type WorkflowStatus struct {
 	Error      error
 }
 
-// GetStatus retrieves the status of a workflow execution
+// GetStatus retrieves the status of a workflow execution using DBOS SDK
 func (r *WorkflowRunner) GetStatus(ctx context.Context, runID string) (*WorkflowStatus, error) {
 	if r.dbosRuntime == nil {
 		return nil, errors.New("status tracking requires DBOS runtime")
 	}
 
-	// Query DBOS workflow_status table
-	statusInfo, err := r.dbosRuntime.GetWorkflowStatus(ctx, runID)
+	// Retrieve workflow handle using DBOS SDK
+	handle, err := dbos.RetrieveWorkflow[*WorkflowResult](r.dbosRuntime.Context(), runID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve workflow: %w", err)
+	}
+
+	// Get workflow status from handle
+	dbosStatus, err := handle.GetStatus()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get workflow status: %w", err)
 	}
 
 	// Convert DBOS status to our status format
-	state := mapDBOSStatus(statusInfo.Status)
+	state := mapDBOSStatus(string(dbosStatus.Status))
 
-	// Convert timestamps
-	startedAt := time.UnixMilli(statusInfo.CreatedAt)
+	// Determine finished time based on status
 	var finishedAt *time.Time
-
-	// If workflow is in a terminal state, set finished time
 	if state == "succeeded" || state == "failed" {
-		updatedAt := time.UnixMilli(statusInfo.UpdatedAt)
-		finishedAt = &updatedAt
+		finishedAt = &dbosStatus.UpdatedAt
+	}
+
+	// Extract result if available (only present after successful completion)
+	var result *WorkflowResult
+	if dbosStatus.Output != nil {
+		if r, ok := dbosStatus.Output.(*WorkflowResult); ok {
+			result = r
+		}
 	}
 
 	return &WorkflowStatus{
 		RunID:      runID,
 		State:      state,
-		StartedAt:  startedAt,
+		StartedAt:  dbosStatus.CreatedAt,
 		FinishedAt: finishedAt,
+		Result:     result,
+		Error:      dbosStatus.Error,
 	}, nil
 }
 
