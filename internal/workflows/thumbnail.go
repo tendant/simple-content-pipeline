@@ -138,9 +138,10 @@ func (w *ThumbnailWorkflow) Execute(wctx *WorkflowContext) (*WorkflowResult, err
 	}
 	log.Printf("[%s] Image decoded successfully, format: %s", wctx.RunID, format)
 
-	// Parse dimensions from metadata (default 300x300)
+	// Parse dimensions and quality from metadata (defaults: 300x300, quality 80)
 	width := 300
 	height := 300
+	quality := 80
 	if wctx.Request.Metadata != nil {
 		if w, ok := wctx.Request.Metadata["width"]; ok {
 			if wInt, err := strconv.Atoi(w); err == nil && wInt > 0 {
@@ -152,8 +153,13 @@ func (w *ThumbnailWorkflow) Execute(wctx *WorkflowContext) (*WorkflowResult, err
 				height = hInt
 			}
 		}
+		if q, ok := wctx.Request.Metadata["quality"]; ok {
+			if qInt, err := strconv.Atoi(q); err == nil && qInt > 0 && qInt <= 100 {
+				quality = qInt
+			}
+		}
 	}
-	log.Printf("[%s] Target dimensions: %dx%d", wctx.RunID, width, height)
+	log.Printf("[%s] Target dimensions: %dx%d, quality: %d", wctx.RunID, width, height, quality)
 
 	// Generate thumbnail using Lanczos resampling
 	thumbnail := imaging.Fit(img, width, height, imaging.Lanczos)
@@ -164,9 +170,9 @@ func (w *ThumbnailWorkflow) Execute(wctx *WorkflowContext) (*WorkflowResult, err
 	actualHeight := bounds.Dy()
 	log.Printf("[%s] Thumbnail generated: %dx%d", wctx.RunID, actualWidth, actualHeight)
 
-	// Encode as JPEG with quality 80
+	// Encode as JPEG with configured quality
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, thumbnail, &jpeg.Options{Quality: 80}); err != nil {
+	if err := jpeg.Encode(&buf, thumbnail, &jpeg.Options{Quality: quality}); err != nil {
 		log.Printf("[%s] Failed to encode JPEG: %v", wctx.RunID, err)
 		return &WorkflowResult{
 			Success: false,

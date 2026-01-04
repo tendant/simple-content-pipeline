@@ -17,22 +17,30 @@ from dbos import DBOS
 
 logger = logging.getLogger(__name__)
 
-# Global OCR instance (loaded once)
-_ocr_engine = None
+# OCR engine cache (one engine per language)
+_ocr_engines = {}
 
 
-def get_ocr_engine():
-    """Get or initialize PaddleOCR engine (singleton pattern)"""
-    global _ocr_engine
-    if _ocr_engine is None:
-        logger.info("Loading PaddleOCR engine...")
-        # Use English model, enable textline orientation for rotated text
-        _ocr_engine = PaddleOCR(
+def get_ocr_engine(lang='en'):
+    """
+    Get or initialize PaddleOCR engine for the specified language
+
+    Args:
+        lang: Language code (default: 'en')
+
+    Returns:
+        PaddleOCR engine instance
+    """
+    global _ocr_engines
+    if lang not in _ocr_engines:
+        logger.info(f"Loading PaddleOCR engine for language: {lang}...")
+        # Enable textline orientation for rotated text
+        _ocr_engines[lang] = PaddleOCR(
             use_textline_orientation=True,
-            lang='en'
+            lang=lang
         )
-        logger.info("✓ PaddleOCR engine loaded")
-    return _ocr_engine
+        logger.info(f"✓ PaddleOCR engine loaded for language: {lang}")
+    return _ocr_engines[lang]
 
 
 class ContentHTTPClient:
@@ -111,11 +119,12 @@ def ocr_workflow(content_id: str, metadata: Dict[str, Any] = None) -> Dict[str, 
         # Convert PIL Image to numpy array for PaddleOCR
         image_array = np.array(image)
 
-        # Run OCR
-        logger.info(f"[{run_id}] Running OCR extraction...")
+        # Run OCR with configured language
+        language = metadata.get('language', 'en')
+        logger.info(f"[{run_id}] Running OCR extraction (language: {language})...")
         start_time = time.time()
 
-        ocr_engine = get_ocr_engine()
+        ocr_engine = get_ocr_engine(lang=language)
         result = ocr_engine.ocr(image_array)
 
         processing_time_ms = int((time.time() - start_time) * 1000)
@@ -172,7 +181,7 @@ def ocr_workflow(content_id: str, metadata: Dict[str, Any] = None) -> Dict[str, 
             'average_confidence': avg_confidence,
             'processing_time_ms': processing_time_ms,
             'engine': 'paddleocr',
-            'language': metadata.get('language', 'en'),
+            'language': language,
             'image_size': {
                 'width': image.size[0],
                 'height': image.size[1]

@@ -17,18 +17,29 @@ from dbos import DBOS, SetWorkflowID
 logger = logging.getLogger(__name__)
 
 # Global model instance (loaded once)
-_yolo_model = None
+# YOLO model cache (one model per variant)
+_yolo_models = {}
 
 
-def get_yolo_model():
-    """Get or initialize YOLO model (singleton pattern)"""
-    global _yolo_model
-    if _yolo_model is None:
-        logger.info("Loading YOLO11 model...")
-        # Use YOLO11n (nano) for speed, can switch to yolo11m/yolo11l for accuracy
-        _yolo_model = YOLO('yolo11n.pt')
-        logger.info("✓ YOLO11 model loaded")
-    return _yolo_model
+def get_yolo_model(model='yolo11n'):
+    """
+    Get or initialize YOLO model for the specified variant
+
+    Args:
+        model: Model variant - 'yolo11n' (nano, fast), 'yolo11s' (small),
+               'yolo11m' (medium), 'yolo11l' (large, accurate), 'yolo11x' (extra large)
+               Default: 'yolo11n'
+
+    Returns:
+        YOLO model instance
+    """
+    global _yolo_models
+    if model not in _yolo_models:
+        logger.info(f"Loading YOLO model: {model}...")
+        model_file = f'{model}.pt'
+        _yolo_models[model] = YOLO(model_file)
+        logger.info(f"✓ YOLO model loaded: {model}")
+    return _yolo_models[model]
 
 
 class ContentHTTPClient:
@@ -104,11 +115,12 @@ def detect_objects_workflow(content_id: str, metadata: Dict[str, Any] = None) ->
         image = Image.open(io.BytesIO(image_data))
         logger.info(f"[{run_id}] Image loaded: {image.size} {image.mode}")
 
-        # Run object detection
-        logger.info(f"[{run_id}] Running object detection...")
+        # Run object detection with configured model
+        model_variant = metadata.get('model', 'yolo11n')
+        logger.info(f"[{run_id}] Running object detection (model: {model_variant})...")
         start_time = time.time()
 
-        model = get_yolo_model()
+        model = get_yolo_model(model=model_variant)
         results = model(image, verbose=False)
 
         processing_time_ms = int((time.time() - start_time) * 1000)
@@ -137,7 +149,7 @@ def detect_objects_workflow(content_id: str, metadata: Dict[str, Any] = None) ->
             'objects': detections,
             'total_objects': len(detections),
             'processing_time_ms': processing_time_ms,
-            'model': 'yolo11n',
+            'model': model_variant,
             'image_size': {
                 'width': image.size[0],
                 'height': image.size[1]
