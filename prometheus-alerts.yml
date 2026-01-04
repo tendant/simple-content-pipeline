@@ -1,0 +1,191 @@
+# Prometheus Alert Rules for Simple-Workflow Pipeline
+# Add this file to your Prometheus configuration:
+#   rule_files:
+#     - 'prometheus-alerts.yml'
+
+groups:
+  # PRIORITY #1: Deadletter Queue Alerts
+  - name: workflow_deadletter_alerts
+    interval: 30s
+    rules:
+      # CRITICAL: Deadletter queue is growing
+      - alert: WorkflowDeadletterQueueGrowing
+        expr: |
+          increase(workflow_intent_deadletter_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: workflow
+          priority: P1
+        annotations:
+          summary: "Workflow deadletter queue growing"
+          description: "{{ $value }} workflows moved to deadletter in last 5 minutes for workflow {{ $labels.workflow_name }} on worker {{ $labels.worker_id }}"
+          runbook: "Check workflow_intent table for deadletter entries. Query: SELECT id, name, last_error, attempt_count FROM workflow.workflow_intent WHERE status = 'deadletter' ORDER BY updated_at DESC LIMIT 20;"
+
+      # CRITICAL: High deadletter rate (>10% of workflows failing permanently)
+      - alert: WorkflowHighDeadletterRate
+        expr: |
+          (
+            rate(workflow_intent_deadletter_total[10m])
+            /
+            rate(workflow_intent_claimed_total[10m])
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: workflow
+          priority: P1
+        annotations:
+          summary: "High deadletter rate for {{ $labels.workflow_name }}"
+          description: "{{ $value | humanizePercentage }} of workflows are failing permanently"
+          runbook: "Investigate common failures in deadletter queue. Check application logs for recurring errors."
+
+      # WARNING: Failed attempts increasing (workflows retrying)
+      - alert: WorkflowFailedAttemptsIncreasing
+        expr: |
+          rate(workflow_intent_failed_attempts_total[10m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: workflow
+          priority: P2
+        annotations:
+          summary: "Workflow {{ $labels.workflow_name }} experiencing failures"
+          description: "{{ $value }} failed attempts per second (attempt {{ $labels.attempt }})"
+          runbook: "Check for transient errors. If failures persist, workflows will move to deadletter."
+
+  # Worker Health Alerts
+  - name: workflow_worker_alerts
+    interval: 30s
+    rules:
+      # CRITICAL: Worker stopped polling
+      - alert: WorkflowWorkerDown
+        expr: |
+          (time() - workflow_worker_last_poll_timestamp) > 120
+        for: 1m
+        labels:
+          severity: critical
+          component: worker
+          priority: P1
+        annotations:
+          summary: "Worker {{ $labels.worker_id }} stopped polling"
+          description: "No poll activity detected for 2+ minutes. Worker may be down or stuck."
+          runbook: "Check worker process status: ps aux | grep worker. Check worker logs for errors or deadlocks."
+
+      # WARNING: High poll error rate
+      - alert: WorkflowWorkerPollErrors
+        expr: |
+          rate(workflow_worker_poll_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: worker
+          priority: P2
+        annotations:
+          summary: "Worker {{ $labels.worker_id }} experiencing poll errors"
+          description: "{{ $value }} poll errors per second (type: {{ $labels.error_type }})"
+          runbook: "Check database connectivity. Common error types: db_closed, timeout, unknown"
+
+  # Queue Depth Alerts
+  - name: workflow_queue_alerts
+    interval: 30s
+    rules:
+      # WARNING: Queue backlog (100+ pending intents)
+      - alert: WorkflowQueueBacklog
+        expr: |
+          workflow_intent_queue_depth{status="pending"} > 100
+        for: 10m
+        labels:
+          severity: warning
+          component: queue
+          priority: P2
+        annotations:
+          summary: "Queue backlog for {{ $labels.workflow_name }}"
+          description: "{{ $value }} pending intents in queue"
+          runbook: "Consider scaling up workers or increasing concurrency. Check if workers are processing normally."
+
+      # INFO: Queue completely empty (might indicate no work or upstream issues)
+      - alert: WorkflowQueueEmpty
+        expr: |
+          workflow_intent_queue_depth{status="pending"} == 0
+        for: 30m
+        labels:
+          severity: info
+          component: queue
+          priority: P3
+        annotations:
+          summary: "Queue empty for {{ $labels.workflow_name }}"
+          description: "No pending workflows for 30+ minutes. May be normal or indicate upstream issues."
+          runbook: "Verify upstream systems are submitting work. Check if this is expected behavior."
+
+  # Performance Alerts
+  - name: workflow_performance_alerts
+    interval: 30s
+    rules:
+      # WARNING: Slow workflow execution (P95 latency > 60s)
+      - alert: WorkflowSlowExecution
+        expr: |
+          histogram_quantile(0.95, sum(rate(workflow_intent_execution_duration_seconds_bucket[10m])) by (le, workflow_name)) > 60
+        for: 10m
+        labels:
+          severity: warning
+          component: performance
+          priority: P2
+        annotations:
+          summary: "Slow execution for {{ $labels.workflow_name }}"
+          description: "P95 latency is {{ $value }}s (threshold: 60s)"
+          runbook: "Check worker resource usage (CPU, memory). Review workflow implementation for optimization opportunities."
+
+      # WARNING: Very slow workflows (P95 > 5 minutes)
+      - alert: WorkflowVerySlowExecution
+        expr: |
+          histogram_quantile(0.95, sum(rate(workflow_intent_execution_duration_seconds_bucket[10m])) by (le, workflow_name)) > 300
+        for: 5m
+        labels:
+          severity: warning
+          component: performance
+          priority: P1
+        annotations:
+          summary: "Very slow execution for {{ $labels.workflow_name }}"
+          description: "P95 latency is {{ $value }}s (threshold: 300s / 5 minutes)"
+          runbook: "Investigate immediately. Check for resource contention, external API timeouts, or algorithmic issues."
+
+  # Success Rate Alerts
+  - name: workflow_success_rate_alerts
+    interval: 30s
+    rules:
+      # WARNING: Low success rate (< 80%)
+      - alert: WorkflowLowSuccessRate
+        expr: |
+          (
+            sum(rate(workflow_intent_completed_total{status="succeeded"}[10m])) by (workflow_name)
+            /
+            sum(rate(workflow_intent_completed_total[10m])) by (workflow_name)
+          ) < 0.8
+        for: 10m
+        labels:
+          severity: warning
+          component: reliability
+          priority: P2
+        annotations:
+          summary: "Low success rate for {{ $labels.workflow_name }}"
+          description: "Success rate is {{ $value | humanizePercentage }} (threshold: 80%)"
+          runbook: "Review recent failures. Check if this is due to invalid input, external dependencies, or code bugs."
+
+      # CRITICAL: Very low success rate (< 50%)
+      - alert: WorkflowVeryLowSuccessRate
+        expr: |
+          (
+            sum(rate(workflow_intent_completed_total{status="succeeded"}[10m])) by (workflow_name)
+            /
+            sum(rate(workflow_intent_completed_total[10m])) by (workflow_name)
+          ) < 0.5
+        for: 5m
+        labels:
+          severity: critical
+          component: reliability
+          priority: P1
+        annotations:
+          summary: "Very low success rate for {{ $labels.workflow_name }}"
+          description: "Success rate is {{ $value | humanizePercentage }} (threshold: 50%)"
+          runbook: "URGENT: More than half of workflows are failing. Investigate immediately. Consider pausing workflow submissions until issue is resolved."
