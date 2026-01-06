@@ -1,0 +1,39 @@
+FROM public.ecr.aws/docker/library/python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    libtesseract-dev \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy Python worker files
+COPY simple-content-pipeline/python-worker/requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy simple-workflow Python library (from parent context)
+COPY simple-workflow/python/simpleworkflow/ /app/simple-workflow/python/simpleworkflow/
+
+# Copy worker code
+COPY simple-content-pipeline/python-worker/ .
+
+# Create non-root user
+RUN useradd -m -u 1000 app && chown -R app:app /app
+
+USER app
+
+# Add simple-workflow to Python path
+ENV PYTHONPATH="/app/simple-workflow/python:${PYTHONPATH}"
+
+EXPOSE 8082
+
+CMD ["python3", "main.py"]

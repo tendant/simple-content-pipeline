@@ -1,0 +1,42 @@
+FROM public.ecr.aws/docker/library/golang:1.25-alpine AS build
+
+RUN apk update && \
+  apk upgrade && \
+  apk add --no-cache alpine-sdk git make
+
+WORKDIR /app
+
+# Copy go mod files from simple-content-pipeline and dependencies
+COPY simple-content-pipeline/go.mod simple-content-pipeline/go.sum ./
+COPY simple-workflow/ /simple-workflow/
+
+RUN go mod download
+
+# Copy source code
+COPY simple-content-pipeline/ .
+
+# Build the worker binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o pipeline-worker ./cmd/pipeline-worker
+
+FROM alpine:latest
+
+# Install ca-certificates and runtime dependencies
+RUN apk --no-cache add ca-certificates tzdata ffmpeg imagemagick
+
+# Create app user
+RUN addgroup -g 1000 app && adduser -D -u 1000 -G app app
+
+WORKDIR /app
+
+# Copy the binary from builder stage
+COPY --from=build /app/pipeline-worker .
+
+# Set proper permissions
+RUN chown -R app:app /app/
+
+# Switch to non-root user
+USER app
+
+EXPOSE 8081
+
+CMD ["./pipeline-worker"]

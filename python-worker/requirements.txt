@@ -8,9 +8,9 @@ ultralytics>=8.0.0  # YOLOv8
 opencv-python>=4.8.0
 Pillow>=10.0.0
 
-# OCR (for future implementation)
-# paddleocr>=2.7.0
-# paddlepaddle>=2.5.0
+# OCR
+paddleocr>=2.7.0
+paddlepaddle>=2.5.0
 
 # HTTP client
 requests>=2.31.0
