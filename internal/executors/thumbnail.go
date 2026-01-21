@@ -30,14 +30,14 @@ func NewThumbnailExecutor(
 }
 
 // Execute implements simpleworkflow.WorkflowExecutor
-func (e *ThumbnailExecutor) Execute(ctx context.Context, intent *simpleworkflow.WorkflowIntent) (interface{}, error) {
+func (e *ThumbnailExecutor) Execute(ctx context.Context, run *simpleworkflow.WorkflowRun) (interface{}, error) {
 	// Parse payload
 	var params struct {
 		ContentID string `json:"content_id"`
 		Width     int    `json:"width"`
 		Height    int    `json:"height"`
 	}
-	if err := json.Unmarshal(intent.Payload, &params); err != nil {
+	if err := json.Unmarshal(run.Payload, &params); err != nil {
 		return nil, fmt.Errorf("failed to parse payload: %w", err)
 	}
 

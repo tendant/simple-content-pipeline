@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -132,28 +131,15 @@ func main() {
 	if workflowDBURL == "" {
 		log.Printf("⚠ WORKFLOW_DATABASE_URL not set, intent poller disabled (using HTTP fallback)")
 	} else {
-		// Add search_path=workflow to connection string
-		if strings.Contains(workflowDBURL, "?") {
-			workflowDBURL += "&search_path=workflow"
-		} else {
-			workflowDBURL += "?search_path=workflow"
-		}
-
-		workflowDB, err := sql.Open("postgres", workflowDBURL)
-		if err != nil {
-			log.Fatalf("Failed to connect to workflow database: %v", err)
-		}
-		defer workflowDB.Close()
-
-		// Test connection
-		if err := workflowDB.Ping(); err != nil {
-			log.Fatalf("Failed to ping workflow database: %v", err)
-		}
-
 		// Create intent poller
-		supportedWorkflows := []string{"content.thumbnail.v1"}
-		poller := simpleworkflow.NewPoller(workflowDB, supportedWorkflows)
-		poller.SetWorkerID("pipeline-worker-go")
+		poller, err := simpleworkflow.NewPoller(workflowDBURL)
+		if err != nil {
+			log.Fatalf("Failed to create workflow poller: %v", err)
+		}
+		defer poller.Close()
+
+		// Configure poller
+		poller.WithWorkerID("pipeline-worker-go")
 
 		// Initialize Prometheus metrics
 		metrics := simpleworkflow.NewPrometheusMetrics(nil) // nil = use default registry
@@ -162,13 +148,13 @@ func main() {
 
 		// Create and register thumbnail executor
 		thumbnailExecutor := executors.NewThumbnailExecutor(contentReader, derivedWriter)
-		poller.RegisterExecutor("content.thumbnail.v1", thumbnailExecutor)
+		poller.Handle("content.thumbnail.v1", thumbnailExecutor)
 
 		// Start poller in background
 		go poller.Start(context.Background())
 
 		log.Printf("✓ Simple-workflow intent poller started")
-		log.Printf("  Supported workflows: %v", supportedWorkflows)
+		log.Printf("  Supported workflows: content.thumbnail.v1")
 		log.Printf("  Worker ID: pipeline-worker-go")
 	}
 

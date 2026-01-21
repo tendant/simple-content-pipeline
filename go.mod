@@ -10,7 +10,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/prometheus/client_golang v1.19.1
 	github.com/tendant/simple-content v0.2.2
-	github.com/tendant/simple-workflow v0.0.1
+	github.com/tendant/simple-workflow v0.0.3
 )
 
 require (
